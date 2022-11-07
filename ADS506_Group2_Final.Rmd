@@ -84,5 +84,9 @@ Read in data (So you can skip first part)
 setwd(dirname(getActiveDocumentContext()$path))
 SD <- read.csv("SD.csv")
 SD <- SD[,-1]
+```
 
+Select Hourly Variables
+```{r}
+SD <- SD %>% select(Date, SDGE, starts_with("Hourly"))
 ```
