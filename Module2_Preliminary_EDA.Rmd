@@ -1,0 +1,82 @@
+---
+title: "Team 2 Preliminary EDA"
+author: "Mackenzie Carter"
+date: "2022-11-07"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.width=10, fig.height=6) 
+```
+
+```{r}
+#Continuing from Hunter Blum's initial data join and selection
+library(ggplot2)
+library(tidyverse)
+library(psych) #This is only for our describe function
+library(corrplot)
+library(outliers)
+SD <- read.csv("SD.csv", header = TRUE)
+SD <- SD[,-1]
+SD <- SD %>% select(Date, SDGE, starts_with("Hourly"))
+head(SD,10)
+```
+
+First, lets take a broad look at our data, including variable types, descriptive statistics and NA counts. 
+
+```{r}
+str(SD)
+describe(SD)
+```
+
+## Numeric EDA ##
+```{r}
+SD$HourlyDryBulbTemperature <- as.numeric(as.character(SD$HourlyDryBulbTemperature))
+SD$HourlyDewPointTemperature <- as.numeric(as.character(SD$HourlyDewPointTemperature))
+SD$HourlyPrecipitation <- as.numeric(as.character(SD$HourlyPrecipitation))
+num <- SD %>% dplyr::select(where(is.numeric))
+describe(num)
+summary(num)
+```
+Some columns are almost entirely NA values, for sake of early EDA, we will be dropping these columns for now. 
+```{r}
+drop <- c("HourlyWindGustSpeed","HourlyPressureTendency", "HourlyPressureChange", "HourlySeaLevelPressure", "HourlyPrecipitation", "HourlyPrecipitation", "HourlyDewPointTemperature")
+num = num[,!(names(num) %in% drop)]
+summary(num)
+```
+Our remaining NA's will be replaced with the median of its column. 
+```{r}
+num_fill <- num %>% mutate(across(where(is.numeric), ~replace_na(., median(., na.rm=TRUE))))
+summary(num_fill)
+```
+
+## Outliers ## 
+```{r}
+tests = lapply(num_fill, grubbs.test) 
+tests
+```
+The grubbs test shows our max value for wind speed, 33, is an outlier. This makes sense because wind speed ranges in the single digits- it is likely that 33 was a typo. 
+
+## Corrplot ##
+```{r}
+M = cor(num_fill)
+corrplot(M, addCoef.col = 'black')
+```
+As we can see from our corrplot, hourly station pressure and hourly altimeter setting are 100% correlated, hourly dry bulb and wet bulb temperature are closely correlated as well. We will be keeping dry bulb temperature as that correlates to ambient temperature. Altimeter setting is another measure of pressure, so we will be keeping hourly station pressure for ease of understanding. 
+
+```{r}
+drop2 <- c("HourlyWetBulbTemperature","HourlyAltimeterSetting")
+num_fill2 = num_fill[,!(names(num_fill) %in% drop2)]
+M2 = cor(num_fill2)
+corrplot(M2, addCoef.col = 'black')
+```
+
+```{r}
+ggplot(data = num_fill2, aes(x= HourlyDryBulbTemperature, y=SDGE)) + 
+  geom_point() + 
+  labs(title="SDGE Usage By Temp", 
+         x="Dry Bulb Temp (°F)", y = "Hourly Energy Use (MWh)")
+  
+```
+
