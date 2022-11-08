@@ -1,0 +1,95 @@
+title: "Forecasting San Diego Power Consumption"
+author: '"Saba_Alemayehu"'
+date: "2022-11-08"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readxl)
+library(rstudioapi)
+library(parsedate)
+library(lubridate)
+library(tidyverse)
+```
+```{r}
+### San Diego Energy Data
+SD <- read.csv("~/University of San Diego/ADS_506_Applied_Time_Serious/Module two/Project/SD.csv")
+```
+
+```{r}
+#Display rows and columns
+dim(SD)
+```
+```{r}
+#View the first six row
+#head(SD)
+```
+
+```{r}
+#Select Hourly Variables
+SD <- SD %>% select(Date, SDGE, starts_with("Hourly"))
+```
+
+```{r}
+str(SD)
+```
+```{r}
+#basic summary statistics about the data
+summary(SD)
+```
+```{r}
+# sum of missing values per column
+colSums(is.na(SD))
+```
+```{r}
+# Checking the class
+class(SD)
+```
+# Preprocessing
+```{r}
+### Convert character Date to date-time class
+
+SD$Date <- as_datetime(SD$Date)
+```
+```{r}
+#visualizing missing values
+missing.values <- SD %>%
+    gather(key = "key", value = "val") %>%
+    mutate(is.missing = is.na(val)) %>%
+    group_by(key, is.missing) %>%
+    summarise(num.missing = n()) %>%
+    filter(is.missing==T) %>%
+    select(-is.missing) %>%
+    arrange(desc(num.missing)) 
+missing.values %>%
+  ggplot() +
+    geom_bar(aes(x=key, y=num.missing), stat = 'identity') +
+    labs(x='variable', y="number of missing values", title='Number of missing values') +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+```{r}
+# handling missing values
+
+### droping some variables with higher number of NA's HourlyPressureChange(28670), HourlyPressureTendency(28670), HourlyWindGustSpeed(37640)
+SD <-dplyr::select(SD, -c('HourlyPressureChange',
+                         'HourlyPressureTendency',
+                         'HourlyWindGustSpeed'))
+
+### impute missing values
+
+#numerical variables are HourlyAltimeterSetting,HourlyRelativeHumidity, HourlySeaLevelPressure, HourlyStationPressure, HourlyWetBulbTemperature, HourlyWindSpeed
+
+#impute numerical variables by mean
+
+
+
+
+
+#characterstic  variables are HourlyDewPointTemperature, HourlyDryBulbTemperature, HourlyPrecipitation, HourlyPresentWeatherType, HourlySkyConditions, HourlyVisibility, HourlyWindDirection
+
+#impute categorical variables using mode
+```
