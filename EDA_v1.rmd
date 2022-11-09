@@ -24,6 +24,7 @@ SD <- read.csv("~/University of San Diego/ADS_506_Applied_Time_Serious/Module tw
 #Display rows and columns
 dim(SD)
 ```
+
 ```{r}
 #View the first six row
 #head(SD)

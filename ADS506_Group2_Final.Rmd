@@ -15,6 +15,11 @@ library(readxl)
 library(rstudioapi)
 library(parsedate)
 library(lubridate)
+library(psych)
+library(corrplot)
+library(outliers)
+
+# Note - Tidyverse is a collection of packages, see the Attaching packages section below. Usually best to load last so its functions will mask over other packages.
 library(tidyverse)
 ```
 
@@ -84,9 +89,85 @@ Read in data (So you can skip first part)
 setwd(dirname(getActiveDocumentContext()$path))
 SD <- read.csv("SD.csv")
 SD <- SD[,-1]
+SD <- SD %>% select(Date, SDGE, starts_with("Hourly"))
+head(SD)
 ```
 
-Select Hourly Variables
+## Structual and General EDA
+
+First, lets take a broad look at our data, including variable types, descriptive statistics and NA counts. 
+
 ```{r}
-SD <- SD %>% select(Date, SDGE, starts_with("Hourly"))
+str(SD)
+describe(SD)
+```
+
+```{r}
+#visualizing missing values
+missing.values <- SD %>%
+    gather(key = "key", value = "val") %>%
+    mutate(is.missing = is.na(val)) %>%
+    group_by(key, is.missing) %>%
+    summarise(num.missing = n()) %>%
+    filter(is.missing==T) %>%
+    select(-is.missing) %>%
+    arrange(desc(num.missing)) 
+missing.values %>%
+  ggplot() +
+    geom_bar(aes(x=key, y=num.missing), stat = 'identity') +
+    labs(x='variable', y="number of missing values", title='Number of missing values') +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## Numeric EDA ##
+
+```{r}
+SD$HourlyDryBulbTemperature <- as.numeric(as.character(SD$HourlyDryBulbTemperature))
+SD$HourlyDewPointTemperature <- as.numeric(as.character(SD$HourlyDewPointTemperature))
+SD$HourlyPrecipitation <- as.numeric(as.character(SD$HourlyPrecipitation))
+num <- SD %>% dplyr::select(where(is.numeric))
+describe(num)
+summary(num)
+```
+
+Some columns are almost entirely NA values, for sake of early EDA, we will be dropping these columns for now. 
+```{r}
+drop <- c("HourlyWindGustSpeed","HourlyPressureTendency", "HourlyPressureChange", "HourlySeaLevelPressure", "HourlyPrecipitation", "HourlyPrecipitation", "HourlyDewPointTemperature")
+num = num[,!(names(num) %in% drop)]
+summary(num)
+```
+
+Our remaining NA's will be replaced with the median of its column. 
+```{r}
+num_fill <- num %>% mutate(across(where(is.numeric), ~replace_na(., median(., na.rm=TRUE))))
+summary(num_fill)
+```
+
+## Outliers ## 
+```{r}
+tests = lapply(num_fill, grubbs.test) 
+tests
+```
+The grubbs test shows our max value for wind speed, 33, is an outlier. This makes sense because wind speed ranges in the single digits- it is likely that 33 was a typo. 
+
+## Corrplot ##
+```{r}
+M = cor(num_fill)
+corrplot(M, addCoef.col = 'black')
+```
+As we can see from our corrplot, hourly station pressure and hourly altimeter setting are 100% correlated, hourly dry bulb and wet bulb temperature are closely correlated as well. We will be keeping dry bulb temperature as that correlates to ambient temperature. Altimeter setting is another measure of pressure, so we will be keeping hourly station pressure for ease of understanding. 
+
+```{r}
+drop2 <- c("HourlyWetBulbTemperature","HourlyAltimeterSetting")
+num_fill2 = num_fill[,!(names(num_fill) %in% drop2)]
+M2 = cor(num_fill2)
+corrplot(M2, addCoef.col = 'black')
+```
+
+```{r}
+ggplot(data = num_fill2, aes(x= HourlyDryBulbTemperature, y=SDGE)) + 
+  geom_point() + 
+  labs(title="SDGE Usage By Temp", 
+         x="Dry Bulb Temp (°F)", y = "Hourly Energy Use (MWh)")
+  
 ```
