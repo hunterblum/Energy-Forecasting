@@ -18,6 +18,8 @@ library(lubridate)
 library(psych)
 library(corrplot)
 library(outliers)
+library(ggpmisc)
+library(gridExtra)
 
 # Note - Tidyverse is a collection of packages, see the Attaching packages section below. Usually best to load last so its functions will mask over other packages.
 library(tidyverse)
@@ -102,8 +104,8 @@ str(SD)
 describe(SD)
 ```
 
+Evaluate missing values by column
 ```{r}
-#visualizing missing values
 missing.values <- SD %>%
     gather(key = "key", value = "val") %>%
     mutate(is.missing = is.na(val)) %>%
@@ -112,19 +114,36 @@ missing.values <- SD %>%
     filter(is.missing==T) %>%
     select(-is.missing) %>%
     arrange(desc(num.missing)) 
+
 missing.values %>%
-  ggplot() +
-    geom_bar(aes(x=key, y=num.missing), stat = 'identity') +
-    labs(x='variable', y="number of missing values", title='Number of missing values') +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  ggplot() + 
+    geom_bar(aes(x=reorder(key, num.missing), y=num.missing), stat = 'identity') +
+    labs(x='Variable', y="Number of missing values", title='Figure X.x: Number of missing values') +
+    coord_flip()
 ```
+Evaluate NAs by observation - 304 observations are missing all weather data, we will either need to impute or stick with regression models. 
+```{r}
+NA_row <- rowSums(is.na(SD))
+obs <- seq(1:nrow(SD))
 
-## Numeric EDA ##
-
+NA_row <- data.frame(obs, NA_row)
+NA_row %>% filter(NA_row == 16) %>% tally()
+```
+Properly format variables
 ```{r}
 SD$HourlyDryBulbTemperature <- as.numeric(as.character(SD$HourlyDryBulbTemperature))
 SD$HourlyDewPointTemperature <- as.numeric(as.character(SD$HourlyDewPointTemperature))
 SD$HourlyPrecipitation <- as.numeric(as.character(SD$HourlyPrecipitation))
+SD$HourlyVisibility <- as.numeric(SD$HourlyVisibility)
+SD$HourlyWindDirection <- as.numeric(SD$HourlyWindDirection)
+
+# Only run this if you loaded in SD data from EDA
+SD$Date <- as_datetime(SD$Date)
+```
+
+## Numeric EDA 
+
+```{r}
 num <- SD %>% dplyr::select(where(is.numeric))
 describe(num)
 summary(num)
@@ -132,7 +151,7 @@ summary(num)
 
 Some columns are almost entirely NA values, for sake of early EDA, we will be dropping these columns for now. 
 ```{r}
-drop <- c("HourlyWindGustSpeed","HourlyPressureTendency", "HourlyPressureChange", "HourlySeaLevelPressure", "HourlyPrecipitation", "HourlyPrecipitation", "HourlyDewPointTemperature")
+drop <- c("HourlyWindGustSpeed","HourlyPressureTendency", "HourlyPressureChange", "HourlySeaLevelPressure")
 num = num[,!(names(num) %in% drop)]
 summary(num)
 ```
@@ -143,22 +162,26 @@ num_fill <- num %>% mutate(across(where(is.numeric), ~replace_na(., median(., na
 summary(num_fill)
 ```
 
-## Outliers ## 
+### Outliers 
 ```{r}
 tests = lapply(num_fill, grubbs.test) 
 tests
 ```
+
 The grubbs test shows our max value for wind speed, 33, is an outlier. This makes sense because wind speed ranges in the single digits- it is likely that 33 was a typo. 
 
-## Corrplot ##
+Not sure 33 mph winds is a typo, could easily happen in a storm. 
+
+### Correlation
 ```{r}
 M = cor(num_fill)
 corrplot(M, addCoef.col = 'black')
 ```
-As we can see from our corrplot, hourly station pressure and hourly altimeter setting are 100% correlated, hourly dry bulb and wet bulb temperature are closely correlated as well. We will be keeping dry bulb temperature as that correlates to ambient temperature. Altimeter setting is another measure of pressure, so we will be keeping hourly station pressure for ease of understanding. 
+As we can see from our corrplot, hourly station pressure and hourly altimeter setting are 100% correlated, hourly dry bulb and wet bulb temperature are closely correlated as well, and dew point temp with wet and dry bulb temps. We will be keeping dry bulb temperature as that correlates to ambient temperature. Altimeter setting is another measure of pressure, so we will be keeping hourly station pressure for ease of understanding. 
 
+Correlations below look much better
 ```{r}
-drop2 <- c("HourlyWetBulbTemperature","HourlyAltimeterSetting")
+drop2 <- c("HourlyWetBulbTemperature","HourlyAltimeterSetting", "HourlyDewPointTemperature")
 num_fill2 = num_fill[,!(names(num_fill) %in% drop2)]
 M2 = cor(num_fill2)
 corrplot(M2, addCoef.col = 'black')
@@ -167,7 +190,53 @@ corrplot(M2, addCoef.col = 'black')
 ```{r}
 ggplot(data = num_fill2, aes(x= HourlyDryBulbTemperature, y=SDGE)) + 
   geom_point() + 
+  stat_poly_line() + stat_poly_eq() +
   labs(title="SDGE Usage By Temp", 
-         x="Dry Bulb Temp (°F)", y = "Hourly Energy Use (MWh)")
+         x="Dry Bulb Temp (°F)", y = "Hourly Energy Use (MWh)") 
   
+```
+
+
+
+Scatter plots for numeric features compared to hourly energy use - may need to explore non-linear options and/or how imputation methods affect our numbers. 
+```{r}
+ScatPlotter.SD <- function(numvar){
+  ggplot(num_fill2, aes(x = num_fill2[,numvar], y = SDGE)) +
+    geom_point(shape = 1 , alpha = 0.2) +
+    stat_poly_line() + stat_poly_eq(geom = "label") +
+    xlab(colnames(num_fill2[numvar]))
+}
+
+num_cols <- c(2:8)
+Scatterplots <- lapply(num_cols, ScatPlotter.SD)
+grid.arrange(grobs = Scatterplots, top = "Figure X.x")
+```
+
+Time Series for Numeric Features - Moving back to having NAs, since we aren't assessing correlation 
+Will make adjustments/sort out features to make graphs easier to read
+```{r}
+num_withna <- SD %>% select(where(is.numeric))
+num_withna$Date <- SD$Date
+
+TS_plotter <- function(x){
+  ggplot(num_withna, aes(x = Date)) +
+  geom_line(aes(y = num_withna[,x]))+
+  ylab(colnames(num_withna[x]))
+}
+
+Num_cols <- c(1:15)
+TS <- lapply(Num_cols, TS_plotter)
+grid.arrange(grobs = TS, top = "Figure X.x")
+```
+
+Distributions - also will make this look better tomorrow.
+```{r}
+Hist_plotter <- function(x){
+  ggplot(num_withna, aes(x = num_withna[,x])) +
+    geom_histogram() +
+    ylab(colnames(num_withna[x]))
+}
+
+Hists <- lapply(Num_cols, Hist_plotter)
+grid.arrange(grobs = Hists, top = "Figure X.x")
 ```
