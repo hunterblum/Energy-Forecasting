@@ -131,11 +131,16 @@ NA_row %>% filter(NA_row == 16) %>% tally()
 ```
 Properly format variables
 ```{r}
+# Numeric
 SD$HourlyDryBulbTemperature <- as.numeric(as.character(SD$HourlyDryBulbTemperature))
 SD$HourlyDewPointTemperature <- as.numeric(as.character(SD$HourlyDewPointTemperature))
 SD$HourlyPrecipitation <- as.numeric(as.character(SD$HourlyPrecipitation))
 SD$HourlyVisibility <- as.numeric(SD$HourlyVisibility)
 SD$HourlyWindDirection <- as.numeric(SD$HourlyWindDirection)
+
+# Factors
+SD$HourlyPresentWeatherType <- as.factor(SD$HourlyPresentWeatherType)
+SD$HourlySkyConditions <- as.factor(SD$HourlySkyConditions)
 
 # Only run this if you loaded in SD data from EDA
 SD$Date <- as_datetime(SD$Date)
@@ -224,9 +229,15 @@ TS_plotter <- function(x){
   ylab(colnames(num_withna[x]))
 }
 
-Num_cols <- c(1:15)
-TS <- lapply(Num_cols, TS_plotter)
-grid.arrange(grobs = TS, top = "Figure X.x")
+PHP_cols <- c(2,5,6,7,8,9,10)
+TWV_cols <- c(3,4,11,12,13,14,15)
+TS_target <- TS_plotter(1) + ggtitle("Figure X.x: Time Series for SDGE") 
+TS_PHP <- lapply(PHP_cols, TS_plotter)
+TS_TWV <- lapply(TWV_cols, TS_plotter)
+
+plot(TS_target) 
+grid.arrange(grobs = TS_PHP, top = "Figure X.x: Time Series for Pressure, Humidity, and Precipitation Variables")
+grid.arrange(grobs = TS_TWV, top = "Figure X.x: Time Series for Temperature, Wind, and Visibility Variables")
 ```
 
 Distributions - also will make this look better tomorrow.
@@ -234,9 +245,64 @@ Distributions - also will make this look better tomorrow.
 Hist_plotter <- function(x){
   ggplot(num_withna, aes(x = num_withna[,x])) +
     geom_histogram() +
-    ylab(colnames(num_withna[x]))
+    xlab(colnames(num_withna[x]))
 }
 
-Hists <- lapply(Num_cols, Hist_plotter)
-grid.arrange(grobs = Hists, top = "Figure X.x")
+Hist_target <- Hist_plotter(1) + ggtitle("Figure X.x: Distribution for SDGE") 
+Hist_PHP <- lapply(PHP_cols, Hist_plotter)
+Hist_TWV <- lapply(TWV_cols, Hist_plotter)
+
+plot(Hist_target) 
+grid.arrange(grobs = Hist_PHP, top = "Figure X.x: Distribution for Pressure, Humidity, and Precipitation Variables")
+grid.arrange(grobs = Hist_TWV, top = "Figure X.x: Distribution for Temperature, Wind, and Visibility Variables")
+```
+
+Scatter plots with removed NA instead of imputation: See if it has any effect on linear relationships
+```{r}
+num_NoNA <- num_withna %>% na.omit()
+
+ScatPlotter.SD <- function(numvar){
+  ggplot(num_NoNA, aes(x = num_NoNA[,numvar], y = SDGE)) +
+    geom_point(shape = 1 , alpha = 0.2) +
+    stat_poly_line() + stat_poly_eq(geom = "label") +
+    xlab(colnames(num_NoNA[numvar]))
+}
+
+Scat_PHP <- lapply(PHP_cols, ScatPlotter.SD)
+Scat_TWV <- lapply(TWV_cols, ScatPlotter.SD)
+
+grid.arrange(grobs = Scat_PHP, top = "Figure X.x: Scatter Plot for Pressure, Humidity, and Precipitation Variables (NAs Removed)")
+grid.arrange(grobs = Scat_TWV, top = "Figure X.x: Scatter Plot for Temperature, Wind, and Visibility Variables (NAs Removed)")
+```
+
+## Categorical EDA
+Bar plots - Not sure this will work with how many categories we have, could maybe use a table or consolidate similar categories.
+```{r}
+BarPlotter.SD <- function(xvar){
+  ggplot(SD, aes_(x = SD[,xvar])) +
+    geom_bar(color = "black") + coord_flip() +
+    xlab(colnames(SD[xvar]))
+}
+
+Barplots <- lapply(c(7,12), BarPlotter.SD)
+grid.arrange(grobs = Barplots)
+```
+
+Category Count Tables
+```{r}
+SD %>% group_by(HourlyPresentWeatherType) %>% tally() %>% arrange(desc(n))
+SD %>% group_by(HourlySkyConditions) %>% tally() %>% arrange(desc(n))
+```
+
+ANOVAs to see if category affects SDGE - Not sure if these are appropriate, may need to look into post-hoc tests since I think having so many categories is forcing significance, will read up on Bonferroni and Tukey tests
+```{r}
+WT_aov <- aov(SDGE ~ HourlyPresentWeatherType, data = SD)
+
+summary(WT_aov)
+```
+
+```{r}
+SC_aov <- aov(SDGE ~ HourlySkyConditions, data = SD)
+
+summary(SC_aov)
 ```
