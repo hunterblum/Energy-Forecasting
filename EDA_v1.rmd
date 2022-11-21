@@ -72,25 +72,45 @@ missing.values %>%
     labs(x='variable', y="number of missing values", title='Number of missing values') +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
+
 ```{r}
-# handling missing values
+# Preprocessing
+### Convert character Date to date-time class
 
-### droping some variables with higher number of NA's HourlyPressureChange(28670), HourlyPressureTendency(28670), HourlyWindGustSpeed(37640)
-SD <-dplyr::select(SD, -c('HourlyPressureChange',
-                         'HourlyPressureTendency',
-                         'HourlyWindGustSpeed'))
+SD$Date <- as_datetime(SD$Date)
 
-### impute missing values
+#convert "HourlyDryBulbTemperature"to numeric because we will focus only on the ‘HourlyDryBulbTemperature’ which is the outside temperature in deg F.
+SD$HourlyDryBulbTemperature <- as.numeric(as.character(SD$HourlyDryBulbTemperature))
 
-#numerical variables are HourlyAltimeterSetting,HourlyRelativeHumidity, HourlySeaLevelPressure, HourlyStationPressure, HourlyWetBulbTemperature, HourlyWindSpeed
+#Missing Value Imputation by Last Observation Carried Forward(na_locf)
+#Perform LOCF and remove remaining NAs
+SD$HourlyDryBulbTemperature<-na.locf(SD$HourlyDryBulbTemperature, na_remaining = "rm")
 
-#impute numerical variables by mean
+# Extraction of time components
+#extract date
+SD$date<-as.Date(SD$Date,format = "%y-%m-%d")
+
+#Extract Year 
+SD$year<-format(SD$Date,"%Y")
+
+#extract the month
+SD$month<-format(SD$Date,"%m")
+
+#extract the hour
+SD$hour<-format(SD$Date, format = "%H")
+
+#Numeric Day of Week (Assuming Week Starts on Monday)
+#In this scenario, a 1 indicates a Monday, 2 indicates a Tuesday, and so on
+SD$weakday<-wday(SD$Date, week_start=1)
 
 
 
+#Visualising the Time Series
+#In this project we will analyze past 4 years of hourly energy consumption data of SDGE utility to find trends in energy consumption around hour of the day, day of the week, season of the year, etc., and also to check if factors like outside temperature and solar installations in the region affect the energy consumption.
 
+SDGE.ts<-ts(SD$SDGE, start = c(2019,1), frequency = 24*365.25)
 
-#characterstic  variables are HourlyDewPointTemperature, HourlyDryBulbTemperature, HourlyPrecipitation, HourlyPresentWeatherType, HourlySkyConditions, HourlyVisibility, HourlyWindDirection
-
-#impute categorical variables using mode
+# view the plot
+autoplot(SDGE.ts) +
+theme_classic()
 ```
