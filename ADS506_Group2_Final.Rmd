@@ -20,6 +20,8 @@ library(corrplot)
 library(outliers)
 library(ggpmisc)
 library(gridExtra)
+library(zoo)
+library(tibbletime)
 
 # Note - Tidyverse is a collection of packages, see the Attaching packages section below. Usually best to load last so its functions will mask over other packages.
 library(tidyverse)
@@ -60,11 +62,12 @@ SD_weather <- read.csv("Weather.csv")
 ### Joining
 Clean Energy Dates
 ```{r}
-SD_energy <- SD_energy %>% mutate(HR = HR-1)
+SD_energy <- SD_energy %>% mutate(HR = ifelse(HR == 24, 0, HR))
 SD_energy$Date <- ymd_h(paste0(SD_energy$Date, SD_energy$HR))
 
 # Shouldn't need hour variable anymore
 SD_energy <- SD_energy %>% select(!HR)
+
 ```
 
 Clean Weather Dates
@@ -145,6 +148,16 @@ SD$HourlySkyConditions <- as.factor(SD$HourlySkyConditions)
 # Only run this if you loaded in SD data from EDA
 SD$Date <- as_datetime(SD$Date)
 ```
+## Imputation
+Since we're doing a time-based imputation, we won't separate training/testing data before imputing in case the first validation observation is missing values. 
+```{r}
+# NAs in wind gusts should be zero
+SD <- SD %>% mutate(HourlyWindGustSpeed = ifelse(is.na(HourlyWindGustSpeed), 0, HourlyWindGustSpeed))
+
+# Fill the rest of NAs with the last non-NA value
+SD <- na.locf(SD)
+```
+
 
 ## Numeric EDA 
 
@@ -154,22 +167,9 @@ describe(num)
 summary(num)
 ```
 
-Some columns are almost entirely NA values, for sake of early EDA, we will be dropping these columns for now. 
-```{r}
-drop <- c("HourlyWindGustSpeed","HourlyPressureTendency", "HourlyPressureChange", "HourlySeaLevelPressure")
-num = num[,!(names(num) %in% drop)]
-summary(num)
-```
-
-Our remaining NA's will be replaced with the median of its column. 
-```{r}
-num_fill <- num %>% mutate(across(where(is.numeric), ~replace_na(., median(., na.rm=TRUE))))
-summary(num_fill)
-```
-
 ### Outliers 
 ```{r}
-tests = lapply(num_fill, grubbs.test) 
+tests = lapply(num, grubbs.test) 
 tests
 ```
 
@@ -179,58 +179,58 @@ Not sure 33 mph winds is a typo, could easily happen in a storm.
 
 ### Correlation
 ```{r}
-M = cor(num_fill)
+M = cor(num)
 corrplot(M, addCoef.col = 'black')
 ```
-As we can see from our corrplot, hourly station pressure and hourly altimeter setting are 100% correlated, hourly dry bulb and wet bulb temperature are closely correlated as well, and dew point temp with wet and dry bulb temps. We will be keeping dry bulb temperature as that correlates to ambient temperature. Altimeter setting is another measure of pressure, so we will be keeping hourly station pressure for ease of understanding. 
+As we can see from our corrplot, station pressure, altimeter setting, & sea level pressure are 100% correlated. Hourly dry bulb, wet bulb, and dew point temperatures are closely correlated as well. We will be keeping wet bulb temperature as that is analogous to what humans feel. Altimeter setting is another measure of pressure, so we will be keeping hourly station pressure for ease of understanding. 
 
 Correlations below look much better
 ```{r}
-drop2 <- c("HourlyWetBulbTemperature","HourlyAltimeterSetting", "HourlyDewPointTemperature")
-num_fill2 = num_fill[,!(names(num_fill) %in% drop2)]
-M2 = cor(num_fill2)
+drop2 <- c("HourlyDryBulbTemperature","HourlyAltimeterSetting", "HourlyDewPointTemperature", "HourlySeaLevelPressure")
+num2 = num[,!(names(num) %in% drop2)]
+M2 = cor(num2)
 corrplot(M2, addCoef.col = 'black')
 ```
 
 ```{r}
-ggplot(data = num_fill2, aes(x= HourlyDryBulbTemperature, y=SDGE)) + 
+ggplot(data = num2, aes(x= HourlyWetBulbTemperature, y=SDGE)) + 
   geom_point() + 
   stat_poly_line() + stat_poly_eq() +
   labs(title="SDGE Usage By Temp", 
-         x="Dry Bulb Temp (°F)", y = "Hourly Energy Use (MWh)") 
+         x="Wet Bulb Temp (°F)", y = "Hourly Energy Use (MWh)") 
   
 ```
 
 
 
-Scatter plots for numeric features compared to hourly energy use - may need to explore non-linear options and/or how imputation methods affect our numbers. 
+Scatter plots for numeric features compared to hourly energy use - may need to explore non-linear options. 
 ```{r}
 ScatPlotter.SD <- function(numvar){
-  ggplot(num_fill2, aes(x = num_fill2[,numvar], y = SDGE)) +
+  ggplot(num2, aes(x = num2[,numvar], y = SDGE)) +
     geom_point(shape = 1 , alpha = 0.2) +
     stat_poly_line() + stat_poly_eq(geom = "label") +
-    xlab(colnames(num_fill2[numvar]))
+    xlab(colnames(num2[numvar]))
 }
 
-num_cols <- c(2:8)
+num_cols <- c(2:11)
 Scatterplots <- lapply(num_cols, ScatPlotter.SD)
 grid.arrange(grobs = Scatterplots, top = "Figure X.x")
 ```
 
-Time Series for Numeric Features - Moving back to having NAs, since we aren't assessing correlation 
+Time Series for Numeric Features 
 Will make adjustments/sort out features to make graphs easier to read
 ```{r}
-num_withna <- SD %>% select(where(is.numeric))
-num_withna$Date <- SD$Date
+num_wdate <- num2
+num_wdate$Date <- SD$Date
 
 TS_plotter <- function(x){
-  ggplot(num_withna, aes(x = Date)) +
-  geom_line(aes(y = num_withna[,x]))+
-  ylab(colnames(num_withna[x]))
+  ggplot(num_wdate, aes(x = Date)) +
+  geom_line(aes(y = num_wdate[,x]))+
+  ylab(colnames(num_wdate[x]))
 }
 
-PHP_cols <- c(2,5,6,7,8,9,10)
-TWV_cols <- c(3,4,11,12,13,14,15)
+PHP_cols <- c(3,4,5,6)
+TWV_cols <- c(2,8,9,10,11)
 TS_target <- TS_plotter(1) + ggtitle("Figure X.x: Time Series for SDGE") 
 TS_PHP <- lapply(PHP_cols, TS_plotter)
 TS_TWV <- lapply(TWV_cols, TS_plotter)
@@ -243,9 +243,9 @@ grid.arrange(grobs = TS_TWV, top = "Figure X.x: Time Series for Temperature, Win
 Distributions - also will make this look better tomorrow.
 ```{r}
 Hist_plotter <- function(x){
-  ggplot(num_withna, aes(x = num_withna[,x])) +
+  ggplot(num_wdate, aes(x = num_wdate[,x])) +
     geom_histogram() +
-    xlab(colnames(num_withna[x]))
+    xlab(colnames(num_wdate[x]))
 }
 
 Hist_target <- Hist_plotter(1) + ggtitle("Figure X.x: Distribution for SDGE") 
@@ -257,52 +257,120 @@ grid.arrange(grobs = Hist_PHP, top = "Figure X.x: Distribution for Pressure, Hum
 grid.arrange(grobs = Hist_TWV, top = "Figure X.x: Distribution for Temperature, Wind, and Visibility Variables")
 ```
 
-Scatter plots with removed NA instead of imputation: See if it has any effect on linear relationships
-```{r}
-num_NoNA <- num_withna %>% na.omit()
-
-ScatPlotter.SD <- function(numvar){
-  ggplot(num_NoNA, aes(x = num_NoNA[,numvar], y = SDGE)) +
-    geom_point(shape = 1 , alpha = 0.2) +
-    stat_poly_line() + stat_poly_eq(geom = "label") +
-    xlab(colnames(num_NoNA[numvar]))
-}
-
-Scat_PHP <- lapply(PHP_cols, ScatPlotter.SD)
-Scat_TWV <- lapply(TWV_cols, ScatPlotter.SD)
-
-grid.arrange(grobs = Scat_PHP, top = "Figure X.x: Scatter Plot for Pressure, Humidity, and Precipitation Variables (NAs Removed)")
-grid.arrange(grobs = Scat_TWV, top = "Figure X.x: Scatter Plot for Temperature, Wind, and Visibility Variables (NAs Removed)")
-```
-
 ## Categorical EDA
-Bar plots - Not sure this will work with how many categories we have, could maybe use a table or consolidate similar categories.
-```{r}
-BarPlotter.SD <- function(xvar){
-  ggplot(SD, aes_(x = SD[,xvar])) +
-    geom_bar(color = "black") + coord_flip() +
-    xlab(colnames(SD[xvar]))
-}
 
-Barplots <- lapply(c(7,12), BarPlotter.SD)
-grid.arrange(grobs = Barplots)
-```
-
-Category Count Tables
+Category Count Tables - Bar plots were too messy since we have so many categories
 ```{r}
 SD %>% group_by(HourlyPresentWeatherType) %>% tally() %>% arrange(desc(n))
 SD %>% group_by(HourlySkyConditions) %>% tally() %>% arrange(desc(n))
 ```
 
-ANOVAs to see if category affects SDGE - Not sure if these are appropriate, may need to look into post-hoc tests since I think having so many categories is forcing significance, will read up on Bonferroni and Tukey tests
+ANOVAs to see if category affects SDGE - 
+Wouldn't work with SkyConditions since there are 8,145 categories. I think that having so many groups is forcing a significant result for WeatherType, looking at our Tukey most categories aren't different, so we'll just stick with our numeric features. 
 ```{r}
 WT_aov <- aov(SDGE ~ HourlyPresentWeatherType, data = SD)
 
 summary(WT_aov)
+
+WT_tukey <- TukeyHSD(WT_aov)
 ```
 
-```{r}
-SC_aov <- aov(SDGE ~ HourlySkyConditions, data = SD)
+## Target EDA
 
-summary(SC_aov)
+We've already seen yearly seasonality in SDGE from time series above, lets evaluate a few days to see if there is also a daily seasonality. We'll evaluate the first couple days in Jan, Apr, Jul, and Oct. We definitely see a daily-based seasonality. So, we'll have to account for seasonality across the year and the day when modelling. 
+```{r}
+SD %>% filter(Date < '2019-01-03 18:00:00') %>% ggplot(aes(x = Date, y = SDGE)) + geom_line() + ggtitle("Figure X.x: Seasonality in January")
+SD %>% filter(Date < '2019-04-03 18:00:00') %>% filter(Date > '2019-03-31 18:00:00') %>% ggplot(aes(x = Date, y = SDGE)) + geom_line() + ggtitle("Figure X.x: Seasonality in April")
+SD %>% filter(Date < '2019-07-03 18:00:00') %>% filter(Date > '2019-06-30 18:00:00') %>% ggplot(aes(x = Date, y = SDGE)) + geom_line() + ggtitle("Figure X.x: Seasonality in July")
+SD %>% filter(Date < '2019-10-03 18:00:00') %>% filter(Date > '2019-09-30 18:00:00') %>% ggplot(aes(x = Date, y = SDGE)) + geom_line() + ggtitle("Figure X.x: Seasonality in October")
+```
+
+# Modelling 
+
+When incorporating weather variables into the model, we will lag the predictors behind by 1-hour. This will make it so the SDGE has approximately 1 hour and 5 minutes to take any action on the with a forecast (since weather originally came in at minute 54 of each hour + 1 minute to run the model and return the prediction).
+
+To simulate a real-life scenario, we will use a sliding train/test window for models that need specific training periods for weights (like exponential smoothing/regression). So, the validation set will begin in the last month (Sep 2022), then we will slide 1 hour forward and rerun the model, iterating until we reach the end of the month. 
+
+Any non-weighted method (Naive/moving average) will be calculated on the entire data set and then split for evaluation, since we can assume we'll always have the last n-observations we need for the forecast.
+
+## Baseline Model - Naive Forecast
+
+Create forecasts and calculate metrics
+```{r}
+# SD got knocked out of order somewhere, rearrange to make sure lagging works
+SD <- SD %>% arrange(Date)
+
+# Create Naive Forecasts
+SD$Naive <- lag(SD$SDGE)
+
+# Calculate Error
+SD$Naive_err <- SD$SDGE - SD$Naive
+
+# Split for evaluation
+SD_tr <- SD %>% filter(Date < '2022-08-31 19:00:00')
+SD_val <- SD %>% filter(Date > '2022-08-31 18:00:00')
+
+# Calculate Metrics
+Naive_rmse_tr <- sqrt(mean(SD_tr$Naive_err^2))
+Naive_rmse_val <- sqrt(mean(SD_val$Naive_err^2))
+
+paste0("We had a RMSE of ", round(Naive_rmse_val,2), " with naive forecasts on the validation data.")
+```
+
+Plot on validation data
+```{r}
+ggplot(SD_val, aes(x = Date)) +
+  geom_line(aes(y = Naive), color = 'green', linewidth = 1) +
+  geom_line(aes(y = SDGE), color = 'blue', alpha = 0.4, linewidth = 1) +
+  ggtitle("Figure X.x: Naive Forecasts on Validation Data")
+
+ggplot(SD_val, aes(x = Date, y = Naive_err)) +
+  geom_line() + 
+  ggtitle("Figure X.x: Residuals for Naive Forecasts on Validation Data")
+```
+
+## Moving Average Forecasts
+
+We'll use a function to evaluate different window sizes
+```{r}
+SD_madf <- SD
+RMSE_tr <- c()
+RMSE_val <- c()
+
+SD.ma <- function(k){
+  
+  # Calculate forecasts
+  DailyMA <- rollmean(SD_madf$SDGE, k = k)
+  
+  # Add NAs to forecast vector so we can bind it to our df
+  DailyMA <- c(rep(NA, k-1), DailyMA)
+  
+  SD_madf$DailyMA <- DailyMA
+  
+  # Calculate Error
+  SD_madf$DailyMA_err <- SD_madf$SDGE - SD_madf$DailyMA
+  
+  # Split for eval
+  SD_tr <- SD_madf %>% filter(Date < '2022-08-31 19:00:00') %>% na.omit()
+  SD_val <- SD_madf %>% filter(Date > '2022-08-31 18:00:00')
+  
+  # Calculate Metrics
+  RMSE_tr <- sqrt(mean(SD_tr$DailyMA_err^2))
+  RMSE_val <- sqrt(mean(SD_val$DailyMA_err^2))
+  
+  # List and return
+  RMSE_list <- list(k, RMSE_tr, RMSE_val)
+
+}
+
+k = c(1:24, seq(48, 168, 24))
+
+# Create results data frame
+SD_ma_res <- lapply(k, SD.ma)
+SD_ma_res <- as.data.frame(do.call(rbind, SD_ma_res))
+colnames(SD_ma_res) <- c("k", "RMSE_tr", "RMSE_val")
+
+SD_ma_res <- SD_ma_res %>% filter(RMSE_tr > 0) 
+best_window <- SD_ma_res[which.min(SD_ma_res$RMSE_tr), ]
+best_window$k
 ```
