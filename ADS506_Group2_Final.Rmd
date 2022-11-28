@@ -21,7 +21,7 @@ library(outliers)
 library(ggpmisc)
 library(gridExtra)
 library(zoo)
-library(tibbletime)
+library(forecast)
 
 # Note - Tidyverse is a collection of packages, see the Attaching packages section below. Usually best to load last so its functions will mask over other packages.
 library(tidyverse)
@@ -307,7 +307,7 @@ SD$Naive <- lag(SD$SDGE)
 SD$Naive_err <- SD$SDGE - SD$Naive
 
 # Split for evaluation
-SD_tr <- SD %>% filter(Date < '2022-08-31 19:00:00')
+SD_tr <- SD %>% filter(Date < '2022-08-31 19:00:00') %>% na.omit()
 SD_val <- SD %>% filter(Date > '2022-08-31 18:00:00')
 
 # Calculate Metrics
@@ -373,4 +373,82 @@ colnames(SD_ma_res) <- c("k", "RMSE_tr", "RMSE_val")
 SD_ma_res <- SD_ma_res %>% filter(RMSE_tr > 0) 
 best_window <- SD_ma_res[which.min(SD_ma_res$RMSE_tr), ]
 best_window$k
+
+MA_rmse_tr <- best_window$RMSE_tr[[1]]
+MA_rmse_val <- best_window$RMSE_val[[1]]
+```
+Plot
+```{r}
+DailyMA_2 <- rollmean(SD_madf$SDGE, k = 2)
+DailyMA_2 <- c(rep(NA, 1), DailyMA_2)
+
+
+SD_madf$DailyMA_2 <- DailyMA_2
+
+ggplot(SD_madf, aes(x = Date)) +
+  geom_line(aes(y = SDGE), color = "blue", linewidth = 1, alpha = 0.4) +
+  geom_line(aes(y = DailyMA_2), color = "darkgreen", linewidth = 1, alpha = 0.5)
+```
+## Auto-ARIMA with predictors
+
+Split predictors and target - WetBulbTemp and StationPressure were the only variables with slight relationships, so we'll use those.
+```{r}
+X_tr <- SD_tr %>% select(HourlyWetBulbTemperature, HourlyStationPressure) %>% as.matrix()
+X_val <- SD_val %>% select(HourlyWetBulbTemperature, HourlyStationPressure) %>% as.matrix()
+y_tr <- SD_tr$SDGE
+y_test <- SD_val$SDGE
+```
+
+Create Model
+```{r}
+auto_arima_model <- auto.arima(y_tr, xreg = X_tr, seasonal = TRUE)
+summary(auto_arima_model)
+
+auto_arima_rmse_tr <- sqrt(mean(auto_arima_model$residuals^2))
+```
+
+Forecast
+```{r}
+val_forecast <- forecast(auto_arima_model, xreg = X_val)
+
+# Calculate errors
+val_forecast_err <- SD_val$SDGE - val_forecast$mean
+auto_arima_rmse_val <- sqrt(mean(val_forecast_err^2))
+```
+
+Plot
+```{r}
+autoplot(val_forecast, series = "Forecast") +
+  coord_cartesian(xlim = c(38000, 39488))
+```
+
+# Results
+Create Results df
+```{r}
+Model <- c("Naive", "2-Hour MA", "Auto ARIMA")
+Tr_RMSE <- c(Naive_rmse_tr, MA_rmse_tr, auto_arima_rmse_tr)
+Val_RMSE <- c(Naive_rmse_val, MA_rmse_val, auto_arima_rmse_val)
+
+Results_df <- data.frame(Model, Tr_RMSE, Val_RMSE)
+
+Results_df <- Results_df %>% mutate(BaselineComp_tr = ifelse(Tr_RMSE == Naive_rmse_tr, "Baseline", ifelse(Tr_RMSE < Naive_rmse_tr, "Better", "Worse")))
+Results_df <- Results_df %>% mutate(BaselineComp_val = ifelse(Val_RMSE == Naive_rmse_val, "Baseline", ifelse(Val_RMSE < Naive_rmse_val, "Better", "Worse")))
+```
+
+Plot Training RMSE's
+```{r}
+ggplot(Results_df, aes(x = Model, y = Tr_RMSE, color = BaselineComp_tr)) + 
+  geom_segment(aes(x=Model, xend = Model, y = 0, yend = Tr_RMSE), size = 1.5) +
+  geom_point(size = 6) + coord_flip() + labs(color = "Comparison to Baseline") +
+  scale_color_manual(values = c("blue", "darkgreen", "red")) +
+  ylab("RMSE for Training Data (MWh)") + ggtitle("Figure X.x: Model Results for Training Data")
+```
+
+Plot Validation RMSE's - Reordering isn't working when I flip coordinates. Need to find workaround.
+```{r}
+ggplot(Results_df, aes(x = reorder(Model, -Val_RMSE), y = Val_RMSE, color = BaselineComp_val)) + 
+  geom_segment(aes(x=Model, xend = Model, y = 0, yend = Val_RMSE), size = 1.5) +
+  geom_point(size = 6) + coord_flip() + labs(color = "Comparison to Baseline") +
+  scale_color_manual(values = c("blue", "darkgreen", "red")) +
+  ylab("RMSE for Validation Data (MWh)") + ggtitle("Figure X.x: Model Results for Validation Data")
 ```
