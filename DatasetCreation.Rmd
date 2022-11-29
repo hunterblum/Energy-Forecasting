@@ -1,0 +1,89 @@
+---
+title: "DatasetCreation"
+author: "Hunter Blum"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Libraries
+```{r}
+library(readxl)
+library(rstudioapi)
+library(parsedate)
+library(lubridate)
+library(psych)
+library(corrplot)
+library(outliers)
+library(ggpmisc)
+library(gridExtra)
+library(zoo)
+library(forecast)
+
+# Note - Tidyverse is a collection of packages, see the Attaching packages section below. Usually best to load last so its functions will mask over other packages.
+library(tidyverse)
+```
+
+Set Working Directory
+```{r}
+setwd(dirname(getActiveDocumentContext()$path))
+getwd()
+```
+
+# Read and Join Data
+### San Diego Energy Data
+```{r}
+SD_energy <- list.files(path = paste0(getwd(), "/EnergyData"),
+                        pattern = "*.xlsx",
+                        full.names = T) %>% 
+  lapply(read_excel) %>% 
+  bind_rows()
+
+# They changed the hour variable name between HE and HR, so we'll combine them. CAISO Total was also replaced with CAISO but will be deleted later. Since all NAs are due to name changes it won't be a problem to fill with zero and then sum them to get consistent variable names.
+
+colSums(is.na(SD_energy))
+SD_energy <- SD_energy %>% select(!...8)
+SD_energy[is.na(SD_energy)] <- 0
+SD_energy$HR <- SD_energy$HE + SD_energy$HR
+
+
+# Get rid of the duplicate variables and non-San Diego company data.
+SD_energy <- SD_energy %>% select(-c("HE", "CAISO", "PGE", "SCE", "VEA", "CAISO Total"))
+```
+
+### San Diego Weather Data
+```{r}
+SD_weather <- read.csv("Weather.csv")
+```
+
+### Joining
+Clean Energy Dates
+```{r}
+SD_energy <- SD_energy %>% mutate(HR = ifelse(HR == 24, 0, HR))
+SD_energy$Date <- ymd_h(paste0(SD_energy$Date, SD_energy$HR))
+
+# Shouldn't need hour variable anymore
+SD_energy <- SD_energy %>% select(!HR)
+
+```
+
+Clean Weather Dates
+```{r}
+# Source 4 takes a measurement every six hours. Source 7 is hourly, so we'll keep Source 7 data.
+SD_weather <- SD_weather %>% filter(SOURCE == 7)
+SD_weather$DATE <- as_datetime(parse_iso_8601(SD_weather$DATE))  
+SD_weather$DATE <- round_date(SD_weather$DATE, unit = "hour")
+```
+
+Join
+```{r}
+SD <- SD_energy %>% left_join(SD_weather, by = c('Date' = 'DATE'))
+```
+
+Write
+```{r}
+write.csv(SD, "SD.csv")
+```
