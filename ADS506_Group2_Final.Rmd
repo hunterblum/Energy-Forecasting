@@ -391,3 +391,31 @@ ggplot(Results_df, aes(x = reorder(Model, -Val_RMSE), y = Val_RMSE, color = Base
   scale_color_manual(values = c("blue", "darkgreen", "red")) +
   ylab("RMSE for Validation Data (MWh)") + ggtitle("Figure X.x: Model Results for Validation Data")
 ```
+Manuall ARIMA
+```{r}
+#take a look ACF plot with differenced
+acf(diff(diff(X_tr)))
+```
+```{r}
+#take a look pacf plot with differenced
+pacf(diff(diff(X_tr)))
+```
+```{r}
+#Arima model
+my_arima_model<-Arima(y_tr, order=c(3,2,2),xreg=X_tr)
+summary(my_arima_model)
+```
+
+```{r}
+#check the residuals
+checkresiduals(my_arima_model)
+```
+Forcasting
+```{r}
+my_forcast<-forecast(my_arima_model, xreg = X_val)
+my_forcast
+
+#plot
+autoplot(my_forcast, series = "Forecast") +
+  coord_cartesian(xlim = c(38000, 39488))
+```
