@@ -391,7 +391,7 @@ ggplot(Results_df, aes(x = reorder(Model, -Val_RMSE), y = Val_RMSE, color = Base
   scale_color_manual(values = c("blue", "darkgreen", "red")) +
   ylab("RMSE for Validation Data (MWh)") + ggtitle("Figure X.x: Model Results for Validation Data")
 ```
-Manuall ARIMA
+ARIMA
 ```{r}
 #take a look ACF plot with differenced
 acf(diff(diff(X_tr)))
@@ -418,4 +418,18 @@ my_forcast
 #plot
 autoplot(my_forcast, series = "Forecast") +
   coord_cartesian(xlim = c(38000, 39488))
+```
+Neural network
+```{r}
+#size= (p+p+1)/2 = (3+2+1)/2 =3
+SD_NN <- nnetar(train_wine, p=3, q=2, size =3 )
+summary(SD_NN)
+```
+```{r}
+#prediction
+SD_NN.pred<-forecast(SD_NN, h = 30)
+```
+```{r}
+# Plot the errors for the trianing period
+plot(SD_NN.pred$residuals, main = "Residual Plot for Training Period")
 ```
