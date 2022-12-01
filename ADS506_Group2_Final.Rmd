@@ -430,6 +430,6 @@ summary(SD_NN)
 SD_NN.pred<-forecast(SD_NN, h = 30)
 ```
 ```{r}
-# Plot the errors for the trianing period
+# Plot the errors for the training period
 plot(SD_NN.pred$residuals, main = "Residual Plot for Training Period")
 ```
