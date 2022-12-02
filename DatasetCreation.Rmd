@@ -75,7 +75,7 @@ Clean Weather Dates
 # Source 4 takes a measurement every six hours. Source 7 is hourly, so we'll keep Source 7 data.
 SD_weather <- SD_weather %>% filter(SOURCE == 7)
 SD_weather$DATE <- as_datetime(parse_iso_8601(SD_weather$DATE))  
-SD_weather$DATE <- round_date(SD_weather$DATE, unit = "hour")
+SD_weather$DATE <- floor_date(SD_weather$DATE, unit = "hour")
 ```
 
 Join
