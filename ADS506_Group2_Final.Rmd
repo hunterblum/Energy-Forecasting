@@ -360,13 +360,67 @@ Plot
 autoplot(val_forecast, series = "Forecast") +
   coord_cartesian(xlim = c(38000, 39488))
 ```
+## Manual ARIMA
+Twice differenced ACF plot
+```{r}
+acf(diff(diff(X_tr)))
+```
+
+Twice differenced PACF plot
+```{r}
+#take a look pacf plot with differenced
+pacf(diff(diff(X_tr)))
+```
+
+Model
+```{r}
+#Arima model
+manual_arima_model<- Arima(y_tr, order=c(3,2,2),xreg=X_tr)
+summary(manual_arima_model)
+```
+
+Residual Plot
+```{r}
+#check the residuals
+checkresiduals(manual_arima_model)
+```
+
+Forecast, Calculate RMSE, and Plot
+```{r}
+manual_forecast<-forecast(manual_arima_model, xreg = X_val)
+
+#RMSE
+val_forecast_err <- SD_val$SDGE - manual_forecast$mean
+manual_arima_rmse_val <- sqrt(mean(val_forecast_err^2))
+manual_arima_rmse_tr <- sqrt(mean(manual_arima_model$residuals^2))
+
+#plot
+autoplot(manual_forcast, series = "Forecast") +
+  coord_cartesian(xlim = c(38000, 39488))
+```
+
+## Neural Network
+```{r}
+#size= (p+p+1)/2 = (3+2+1)/2 =3
+SD_NN <- nnetar(train_wine, p=3, q=2, size =3 )
+summary(SD_NN)
+```
+
+```{r}
+#prediction
+SD_NN.pred<-forecast(SD_NN, h = 30)
+```
+```{r}
+# Plot the errors for the training period
+plot(SD_NN.pred$residuals, main = "Residual Plot for Training Period")
+```
 
 # Results
 Create Results df
 ```{r}
-Model <- c("Naive", "2-Hour MA", "Auto ARIMA")
-Tr_RMSE <- c(Naive_rmse_tr, MA_rmse_tr, auto_arima_rmse_tr)
-Val_RMSE <- c(Naive_rmse_val, MA_rmse_val, auto_arima_rmse_val)
+Model <- c("Naive", "2-Hour MA", "Auto ARIMA", "Manual ARIMA")
+Tr_RMSE <- c(Naive_rmse_tr, MA_rmse_tr, auto_arima_rmse_tr, manual_arima_rmse_tr)
+Val_RMSE <- c(Naive_rmse_val, MA_rmse_val, auto_arima_rmse_val, manual_arima_rmse_val)
 
 Results_df <- data.frame(Model, Tr_RMSE, Val_RMSE)
 
@@ -391,45 +445,4 @@ ggplot(Results_df, aes(x = reorder(Model, -Val_RMSE), y = Val_RMSE, color = Base
   scale_color_manual(values = c("blue", "darkgreen", "red")) +
   ylab("RMSE for Validation Data (MWh)") + ggtitle("Figure X.x: Model Results for Validation Data")
 ```
-ARIMA
-```{r}
-#take a look ACF plot with differenced
-acf(diff(diff(X_tr)))
-```
-```{r}
-#take a look pacf plot with differenced
-pacf(diff(diff(X_tr)))
-```
-```{r}
-#Arima model
-my_arima_model<-Arima(y_tr, order=c(3,2,2),xreg=X_tr)
-summary(my_arima_model)
-```
 
-```{r}
-#check the residuals
-checkresiduals(my_arima_model)
-```
-Forcasting
-```{r}
-my_forcast<-forecast(my_arima_model, xreg = X_val)
-my_forcast
-
-#plot
-autoplot(my_forcast, series = "Forecast") +
-  coord_cartesian(xlim = c(38000, 39488))
-```
-Neural network
-```{r}
-#size= (p+p+1)/2 = (3+2+1)/2 =3
-SD_NN <- nnetar(train_wine, p=3, q=2, size =3 )
-summary(SD_NN)
-```
-```{r}
-#prediction
-SD_NN.pred<-forecast(SD_NN, h = 30)
-```
-```{r}
-# Plot the errors for the training period
-plot(SD_NN.pred$residuals, main = "Residual Plot for Training Period")
-```
