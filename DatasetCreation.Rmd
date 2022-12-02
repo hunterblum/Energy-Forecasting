@@ -71,6 +71,7 @@ SD_energy <- SD_energy %>% select(!HR)
 ```
 
 Clean Weather Dates
+Note - We floored the date, giving us a 1:06 prediction window. If you want the weather to match energy at the 6 minute window, switch floor_date to round_date.
 ```{r}
 # Source 4 takes a measurement every six hours. Source 7 is hourly, so we'll keep Source 7 data.
 SD_weather <- SD_weather %>% filter(SOURCE == 7)
