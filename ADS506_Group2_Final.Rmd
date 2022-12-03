@@ -395,7 +395,7 @@ manual_arima_rmse_val <- sqrt(mean(val_forecast_err^2))
 manual_arima_rmse_tr <- sqrt(mean(manual_arima_model$residuals^2))
 
 #plot
-autoplot(manual_forcast, series = "Forecast") +
+autoplot(manual_forecast, series = "Forecast") +
   coord_cartesian(xlim = c(38000, 39488))
 ```
 
@@ -445,4 +445,17 @@ ggplot(Results_df, aes(x = reorder(Model, -Val_RMSE), y = Val_RMSE, color = Base
   scale_color_manual(values = c("blue", "darkgreen", "red")) +
   ylab("RMSE for Validation Data (MWh)") + ggtitle("Figure X.x: Model Results for Validation Data")
 ```
+## avNNet
+```{r}
+modelFit <- avNNet(X_tr,
+                   y_tr,
+                   size = 5,
+                   linout = TRUE,
+                   trace = FALSE)
+summary(modelFit)
 
+nnpred1 <- predict(modelFit, X_val)
+```
+```{r}
+accuracy(nnpred1, y_test)
+```
