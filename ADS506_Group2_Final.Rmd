@@ -511,17 +511,22 @@ autoplot(seasonal_forecast, series = "Forecast") +
 ## Neural Network
 ```{r}
 #size= (p+p+1)/2 = (3+2+1)/2 =3
-SD_NN <- nnetar(train_wine, p=3, q=2, size =3 )
-summary(SD_NN)
+SD_NN <- nnetar(y_tr_ts, p=3, q=2, size =3, xreg = X_tr )
 ```
 
 ```{r}
 #prediction
-SD_NN.pred<-forecast(SD_NN, h = 30)
+SD_NN.pred<-forecast(SD_NN, xreg = X_val)
+summary(SD_NN.pred)
 ```
 ```{r}
 # Plot the errors for the training period
 plot(SD_NN.pred$residuals, main = "Residual Plot for Training Period")
+
+#Accuracy & Plot
+accuracy(SD_NN.pred, y_test)
+autoplot(SD_NN.pred, series = "Forecast") +
+  coord_cartesian(xlim = c(1000, 2000))
 ```
 
 ## avNNet
