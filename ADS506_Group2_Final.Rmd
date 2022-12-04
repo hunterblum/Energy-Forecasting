@@ -235,13 +235,24 @@ SD %>% filter(Date < '2019-07-03 18:00:00') %>% filter(Date > '2019-06-30 18:00:
 SD %>% filter(Date < '2019-10-03 18:00:00') %>% filter(Date > '2019-09-30 18:00:00') %>% ggplot(aes(x = Date, y = SDGE)) + geom_line() + ggtitle("Figure X.x: Seasonality in October")
 ```
 
+# Modelling Data Preparation
+Split predictors and target - WetBulbTemp and StationPressure were the only variables with slight relationships, so we'll use those.
+```{r}
+X_tr <- SD_tr %>% select(HourlyWetBulbTemperature, HourlyStationPressure) %>% as.matrix()
+X_val <- SD_val %>% select(HourlyWetBulbTemperature, HourlyStationPressure) %>% as.matrix()
+y_tr <- SD_tr$SDGE
+y_test <- SD_val$SDGE
+```
+
+Create time series - Will just do it for everything in case we need predictor ts later
+```{r}
+X_tr_ts <- ts(X_tr, frequency = 24)
+X_val_ts <- ts(X_val, frequency = 24)
+y_val_ts <- ts(y_test, frequency = 24)
+y_tr_ts <- ts(y_tr, frequency = 24)
+```
+
 # Modelling 
-
-When incorporating weather variables into the model, we will lag the predictors behind by 1-hour. This will make it so the SDGE has approximately 1 hour and 5 minutes to take any action on the with a forecast (since weather originally came in at minute 54 of each hour + 1 minute to run the model and return the prediction).
-
-To simulate a real-life scenario, we will use a sliding train/test window for models that need specific training periods for weights (like exponential smoothing/regression). So, the validation set will begin in the last month (Sep 2022), then we will slide 1 hour forward and rerun the model, iterating until we reach the end of the month. 
-
-Any non-weighted method (Naive/moving average) will be calculated on the entire data set and then split for evaluation, since we can assume we'll always have the last n-observations we need for the forecast.
 
 ## Baseline Model - Naive Forecast
 
@@ -340,49 +351,9 @@ ggplot(SD_madf, aes(x = Date)) +
   geom_line(aes(y = DailyMA_2), color = "darkgreen", linewidth = 1, alpha = 0.5)
 ```
 
-## Auto-ARIMA with predictors
-
-Split predictors and target - WetBulbTemp and StationPressure were the only variables with slight relationships, so we'll use those.
-```{r}
-X_tr <- SD_tr %>% select(HourlyWetBulbTemperature, HourlyStationPressure) %>% as.matrix()
-X_val <- SD_val %>% select(HourlyWetBulbTemperature, HourlyStationPressure) %>% as.matrix()
-y_tr <- SD_tr$SDGE
-y_test <- SD_val$SDGE
-```
-
-Create Model
-```{r}
-auto_arima_model <- auto.arima(y_tr, xreg = X_tr, seasonal = TRUE, stepwise = FALSE)
-summary(auto_arima_model)
-
-auto_arima_rmse_tr <- sqrt(mean(auto_arima_model$residuals^2))
-
-checkresiduals(auto_arima_model)
-```
-
-Forecast
-```{r}
-val_forecast <- forecast(auto_arima_model, xreg = X_val)
-
-# Calculate errors
-val_forecast_err <- SD_val$SDGE - val_forecast$mean
-auto_arima_rmse_val <- sqrt(mean(val_forecast_err^2))
-```
-
-Plot
-```{r}
-autoplot(val_forecast, series = "Forecast") +
-  coord_cartesian(xlim = c(38000, 39488))
-```
 
 ## ETS
-Create time series - Will just do it for everything in case we need predictor ts later
-```{r}
-X_tr_ts <- ts(X_tr, frequency = 24)
-X_val_ts <- ts(X_val, frequency = 24)
-y_val_ts <- ts(y_test, frequency = 24)
-y_tr_ts <- ts(y_tr, frequency = 24)
-```
+
 
 Fit ETS
 ```{r}
@@ -423,6 +394,34 @@ reg_rmse_tr <- sqrt(mean(SD_reg_addseason$residuals^2))
 #plot
 autoplot(reg_forecast, series = "Forecast") +
   coord_cartesian(xlim = c(1550, 1650))
+```
+## Auto-ARIMA with predictors
+
+
+
+Create Model
+```{r}
+auto_arima_model <- auto.arima(y_tr, xreg = X_tr, seasonal = TRUE, stepwise = FALSE)
+summary(auto_arima_model)
+
+auto_arima_rmse_tr <- sqrt(mean(auto_arima_model$residuals^2))
+
+checkresiduals(auto_arima_model)
+```
+
+Forecast
+```{r}
+val_forecast <- forecast(auto_arima_model, xreg = X_val)
+
+# Calculate errors
+val_forecast_err <- SD_val$SDGE - val_forecast$mean
+auto_arima_rmse_val <- sqrt(mean(val_forecast_err^2))
+```
+
+Plot
+```{r}
+autoplot(val_forecast, series = "Forecast") +
+  coord_cartesian(xlim = c(38000, 39488))
 ```
 
 ## Manual ARIMA
