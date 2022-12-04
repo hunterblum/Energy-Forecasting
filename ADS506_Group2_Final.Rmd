@@ -386,7 +386,7 @@ y_tr_ts <- ts(y_tr, frequency = 24)
 
 Fit ETS
 ```{r}
-SD_ets <- ets(y_tr_ts, model = "ZZZ")
+SD_ets <- ets(y_tr_ts, model = "ZZA")
 summary(SD_ets)
 ```
 
@@ -403,11 +403,28 @@ ets_rmse_tr <- sqrt(mean(SD_ets$residuals^2))
 autoplot(ets_forecast, series = "Forecast") +
   coord_cartesian(xlim = c(1550, 1650))
 ```
-## Regression
+## Regression 
+Based on our time series, it looks like we have additive seasonality with no trend. 
 
 ```{r}
-
+SD_reg_addseason <- tslm(y_tr_ts ~ season)
+SD_reg_addseason_pred <- forecast(SD_reg_addseason, h = length(y_val_ts))
 ```
+
+Forecast, Calculate RMSE, and Plot
+```{r}
+reg_forecast <- forecast(SD_reg_addseason, h=length(y_test))
+
+#RMSE
+val_forecast_err <- SD_val$SDGE - reg_forecast$mean
+reg_rmse_val <- sqrt(mean(val_forecast_err^2))
+reg_rmse_tr <- sqrt(mean(SD_reg_addseason$residuals^2))
+
+#plot
+autoplot(reg_forecast, series = "Forecast") +
+  coord_cartesian(xlim = c(1550, 1650))
+```
+
 ## Manual ARIMA
 Twice differenced ACF plot
 ```{r}
@@ -528,31 +545,33 @@ accuracy(nnpred1, y_test)
 # Results
 Create Results df
 ```{r}
-Model <- c("Naive", "2-Hour MA", "Auto ARIMA", "Manual ARIMA", "Seasonal ARIMA")
-Tr_RMSE <- c(Naive_rmse_tr, MA_rmse_tr, auto_arima_rmse_tr, manual_arima_rmse_tr, seasonal_arima_rmse_tr)
-Val_RMSE <- c(Naive_rmse_val, MA_rmse_val, auto_arima_rmse_val, manual_arima_rmse_val, seasonal_arima_rmse_val)
+Model <- c("Naive", "2-Hour MA", "Auto ARIMA", "Manual ARIMA", "Seasonal ARIMA", "ETS", "Seasonal Reg.")
+Tr_RMSE <- c(Naive_rmse_tr, MA_rmse_tr, auto_arima_rmse_tr, manual_arima_rmse_tr, seasonal_arima_rmse_tr, ets_rmse_tr, reg_rmse_tr)
+Val_RMSE <- c(Naive_rmse_val, MA_rmse_val, auto_arima_rmse_val, manual_arima_rmse_val, seasonal_arima_rmse_val, ets_rmse_val, reg_rmse_val)
 
 Results_df <- data.frame(Model, Tr_RMSE, Val_RMSE)
 
 Results_df <- Results_df %>% mutate(BaselineComp_tr = ifelse(Tr_RMSE == Naive_rmse_tr, "Baseline", ifelse(Tr_RMSE < Naive_rmse_tr, "Better", "Worse")))
 Results_df <- Results_df %>% mutate(BaselineComp_val = ifelse(Val_RMSE == Naive_rmse_val, "Baseline", ifelse(Val_RMSE < Naive_rmse_val, "Better", "Worse")))
+
+Results_df <- Results_df %>% mutate_if(is.character, as.factor)
 ```
 
 Plot Training RMSE's
 ```{r}
-ggplot(Results_df, aes(x = Model, y = Tr_RMSE, color = BaselineComp_tr)) + 
-  geom_segment(aes(x=Model, xend = Model, y = 0, yend = Tr_RMSE), size = 1.5) +
-  geom_point(size = 6) + coord_flip() + labs(color = "Comparison to Baseline") +
-  scale_color_manual(values = c("blue", "darkgreen", "red")) +
-  ylab("RMSE for Training Data (MWh)") + ggtitle("Figure X.x: Model Results for Training Data")
+ggplot(Results_df, aes(x = reorder(Model, -Tr_RMSE), y = Tr_RMSE, color = BaselineComp_tr)) + 
+  geom_segment(aes(x=reorder(Model, -Tr_RMSE), xend = reorder(Model, -Tr_RMSE), y = 0, yend = Tr_RMSE)) +
+  scale_color_manual(values = c("dodgerblue2", "green3", "firebrick2")) +
+  geom_point(size = 9) + coord_flip() + labs(color = "Comparison to Baseline") +
+  ylab("RMSE for Training Data (MWh)") + ggtitle("Figure X.x: Model Results for Training Data") + xlab("Model") + geom_text(aes(label = round(Tr_RMSE)), color = "black", size = 2.5, fontface = "bold")
 ```
 
 Plot Validation RMSE's - Reordering isn't working when I flip coordinates. Need to find workaround.
 ```{r}
 ggplot(Results_df, aes(x = reorder(Model, -Val_RMSE), y = Val_RMSE, color = BaselineComp_val)) + 
-  geom_segment(aes(x=Model, xend = Model, y = 0, yend = Val_RMSE), size = 1.5) +
-  geom_point(size = 6) + coord_flip() + labs(color = "Comparison to Baseline") +
-  scale_color_manual(values = c("blue", "darkgreen", "red")) +
-  ylab("RMSE for Validation Data (MWh)") + ggtitle("Figure X.x: Model Results for Validation Data")
+  geom_segment(aes(x=reorder(Model, -Val_RMSE), xend = reorder(Model, -Val_RMSE), y = 0, yend = Val_RMSE)) +
+  scale_color_manual(values = c("dodgerblue2", "green3", "firebrick2")) +
+  geom_point(size = 9) + coord_flip() + labs(color = "Comparison to Baseline") +
+  ylab("RMSE for Validation Data (MWh)") + ggtitle("Figure X.x: Model Results for Validation Data") + xlab("Model") + geom_text(aes(label = round(Val_RMSE)), color = "black", size = 2.5, fontface = "bold")
 ```
 
