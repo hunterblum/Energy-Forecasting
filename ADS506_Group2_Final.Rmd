@@ -386,7 +386,7 @@ y_tr_ts <- ts(y_tr, frequency = 24)
 
 Fit ETS
 ```{r}
-SD_ets <- ets(y_tr_ts, model = "ZZA")
+SD_ets <- ets(y_tr_ts, model = "ZNA")
 summary(SD_ets)
 ```
 
@@ -511,7 +511,7 @@ autoplot(seasonal_forecast, series = "Forecast") +
 ## Neural Network
 ```{r}
 #size= (p+p+1)/2 = (3+2+1)/2 =3
-SD_NN <- nnetar(y_tr_ts, p=3, q=2, size =3, xreg = X_tr )
+SD_NN <- nnetar(y_tr_ts, p=3, q=2, size =3, xreg = X_tr)
 ```
 
 ```{r}
@@ -527,6 +527,12 @@ plot(SD_NN.pred$residuals, main = "Residual Plot for Training Period")
 accuracy(SD_NN.pred, y_test)
 autoplot(SD_NN.pred, series = "Forecast") +
   coord_cartesian(xlim = c(1000, 2000))
+```
+Get metrics
+```{r}
+nnetar_rmse_tr <- sqrt(mean(SD_NN$residuals^2, na.rm = TRUE))
+val_forecast_err <- SD_val$SDGE - SD_NN.pred$mean
+nnetar_rmse_val <- sqrt(mean(val_forecast_err^2))
 ```
 
 ## avNNet
@@ -550,9 +556,9 @@ accuracy(nnpred1, y_test)
 # Results
 Create Results df
 ```{r}
-Model <- c("Naive", "2-Hour MA", "Auto ARIMA", "Manual ARIMA", "Seasonal ARIMA", "ETS", "Seasonal Reg.")
-Tr_RMSE <- c(Naive_rmse_tr, MA_rmse_tr, auto_arima_rmse_tr, manual_arima_rmse_tr, seasonal_arima_rmse_tr, ets_rmse_tr, reg_rmse_tr)
-Val_RMSE <- c(Naive_rmse_val, MA_rmse_val, auto_arima_rmse_val, manual_arima_rmse_val, seasonal_arima_rmse_val, ets_rmse_val, reg_rmse_val)
+Model <- c("Naive", "2-Hour MA", "Auto ARIMA", "Manual ARIMA", "Seasonal ARIMA", "ETS", "Seasonal Reg.", "Neural Net.")
+Tr_RMSE <- c(Naive_rmse_tr, MA_rmse_tr, auto_arima_rmse_tr, manual_arima_rmse_tr, seasonal_arima_rmse_tr, ets_rmse_tr, reg_rmse_tr, nnetar_rmse_tr)
+Val_RMSE <- c(Naive_rmse_val, MA_rmse_val, auto_arima_rmse_val, manual_arima_rmse_val, seasonal_arima_rmse_val, ets_rmse_val, reg_rmse_val, nnetar_rmse_val)
 
 Results_df <- data.frame(Model, Tr_RMSE, Val_RMSE)
 
