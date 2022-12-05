@@ -408,7 +408,10 @@ ets_forecast <- forecast(SD_ets, h=length(y_test))
 #RMSE
 val_forecast_err <- SD_val$SDGE - ets_forecast$mean
 ets_rmse_val <- sqrt(mean(val_forecast_err^2))
-ets_rmse_tr <- sqrt(mean(SD_ets$residuals^2, na.rm = T))
+
+# Not sure what happened, but training residuals didn't calculate right, so we have to calculate them ourselves
+tr_forecast_err <- SD_tr$SDGE - SD_ets$fitted
+ets_rmse_tr <- sqrt(mean(tr_forecast_err^2))
 
 #plot
 autoplot(ets_forecast, series = "Forecast") +
