@@ -514,7 +514,7 @@ autoplot(seasonal_forecast, series = "Forecast") +
 ## Neural Network
 ```{r}
 #size= (p+p+1)/2 = (3+2+1)/2 =3
-SD_NN <- nnetar(y_tr_ts, p=3, q=2, size =3, xreg = X_tr)
+SD_NN <- nnetar(y_tr_ts, p=3, P=2, size =3, xreg = X_tr)
 ```
 
 ```{r}
