@@ -158,7 +158,7 @@ Scatter plots for numeric features compared to hourly energy use - may need to e
 ScatPlotter.SD <- function(numvar){
   ggplot(num2, aes(x = num2[,numvar], y = SDGE)) +
     geom_point(shape = 1 , alpha = 0.2) +
-    stat_poly_line() + stat_poly_eq(geom = "label") +
+    stat_poly_line() + stat_poly_eq(geom = "label", label.x = "middle") +
     xlab(colnames(num2[numvar]))
 }
 
