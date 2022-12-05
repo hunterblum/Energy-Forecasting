@@ -453,7 +453,7 @@ manual_arima_rmse_tr <- sqrt(mean(manual_arima_model$residuals^2))
 #plot
 autoplot(manual_forecast, series = "Forecast") +
   coord_cartesian(xlim = c(38000, 39488)) +
-  ggtitle("Figure 2.11: Forecast from Regression with ARIMA(3,2,2) Erros")
+  ggtitle("Figure 2.11: Forecast from Regression with ARIMA(3,2,2) Errors")
 ```
 
 ## Manual ARIMA with Seasonality
