@@ -523,13 +523,14 @@ set.seed(123)
 SD_NN <- nnetar(y_tr_ts, p=3, P=2, size =3, xreg = X_tr)
 ```
 
-```{r, echo=FALSE}
+```{r}
 #prediction
 SD_NN.pred<-forecast(SD_NN, xreg = X_val)
 
 # Not sure why but this prints out the entire data frame of forecasts, won't output to reduce appendix clutter.
-summary(SD_NN.pred)
+#summary(SD_NN.pred)
 ```
+
 ```{r}
 # Plot the errors for the training period
 plot(SD_NN.pred$residuals, main = "Figure 2.20: Neural Net Residual Plot for Training Period")
