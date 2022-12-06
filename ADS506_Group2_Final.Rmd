@@ -6,7 +6,7 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
 ```
 
 Libraries
@@ -120,7 +120,7 @@ summary(num)
 ### Outliers 
 ```{r}
 tests = lapply(num, grubbs.test) 
-tests
+tests$HourlyWindSpeed
 ```
 
 The grubbs test shows our max value for wind speed, 33, is an outlier. This makes sense because wind speed ranges in the single digits- it is likely that 33 was a typo. 
@@ -364,6 +364,7 @@ y_test <- SD_val$SDGE
 
 Create Model
 ```{r}
+set.seed(123)
 auto_arima_model <- auto.arima(y_tr, xreg = X_tr, seasonal = TRUE, stepwise = FALSE)
 summary(auto_arima_model)
 
@@ -516,12 +517,15 @@ autoplot(seasonal_forecast, series = "Forecast") +
 ## Neural Network
 ```{r}
 #size= (p+p+1)/2 = (3+2+1)/2 =3
+set.seed(123)
 SD_NN <- nnetar(y_tr_ts, p=3, P=2, size =3, xreg = X_tr)
 ```
 
-```{r}
+```{r, echo=FALSE}
 #prediction
 SD_NN.pred<-forecast(SD_NN, xreg = X_val)
+
+# Not sure why but this prints out the entire data frame of forecasts, won't output to reduce appendix clutter.
 summary(SD_NN.pred)
 ```
 ```{r}
