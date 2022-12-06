@@ -11,26 +11,26 @@ Historical Hourly San Diego Weather Data (Airport Station from 1/1/2013 to 11/4/
 https://www.ncei.noaa.gov/cdo-web/datatools/lcd
 
 # Tasks for Completion
-- [ ] Module 2
--   - [ ] Project Start Form
-- [ ] Module 3
--   - [ ] Problem Statement
--   - [ ] Project Introduction
--   - [ ] Literature Review
-- [ ] Module 4
--   - [ ] EDA & Pre-Processing (Detailed steps to follow)
--   - [ ] Methodology write-ups
-- [ ] Module 5
--   - [ ] Complete time-series model
--   - [ ] Performance evaluations
--   - [ ] Complete methodology section
--   - [ ] Game plan for data story presentation
-- [ ] Module 6
- -   - [ ] Discussion
- -   - [ ] Future Steps
- -   - [ ] Conclusions
- -   - [ ] Appendix
- -   - [ ] Final edits + Submission!  
+- [x] Module 2
+-   - [x] Project Start Form
+- [x] Module 3
+-   - [x] Problem Statement
+-   - [x] Project Introduction
+-   - [x] Literature Review
+- [x] Module 4
+-   - [x] EDA & Pre-Processing (Detailed steps to follow)
+-   - [x] Methodology write-ups
+- [x] Module 5
+-   - [x] Complete time-series model
+-   - [x] Performance evaluations
+-   - [x] Complete methodology section
+-   - [x] Game plan for data story presentation
+- [x] Module 6
+ -   - [x] Discussion
+ -   - [x] Future Steps
+ -   - [x] Conclusions
+ -   - [x] Appendix
+ -   - [x] Final edits + Submission!  
 - [ ] Module 7
 -   - [ ] Submit data story presentation
 -   - [ ] Team peer evaluation
