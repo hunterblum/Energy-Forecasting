@@ -9,6 +9,8 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
 ```
 
+Github: https://github.com/mc3435/ADS_506_Group2
+
 Libraries
 ```{r}
 library(readxl)
