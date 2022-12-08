@@ -1,0 +1,680 @@
+---
+title: "Presentation Code"
+author: "Hunter Blum"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+---
+title: "Forecasting San Diego Power Consumption"
+author: "Hunter Blum, Mackenzie Carter, Saba Alemayehu"
+date: '2022-11-06'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+Github: https://github.com/mc3435/ADS_506_Group2
+
+Libraries
+```{r}
+library(readxl)
+library(rstudioapi)
+library(parsedate)
+library(lubridate)
+library(psych)
+library(corrplot)
+library(outliers)
+library(ggpmisc)
+library(gridExtra)
+library(zoo)
+library(forecast)
+
+# Note - Tidyverse is a collection of packages, see the Attaching packages section below. Usually best to load last so its functions will mask over other packages.
+library(tidyverse)
+```
+
+Set up cores for  models - You may need to install/update Java.
+```{r}
+library(parallel)
+library(doParallel)
+
+cluster <- makeCluster(detectCores() - 1)
+registerDoParallel(cluster)
+```
+
+# Section 1 - EDA/Cleaning 
+Read in data (So you can skip first part)
+```{r}
+setwd(dirname(getActiveDocumentContext()$path))
+SD <- read.csv("SD.csv")
+SD <- SD[,-1]
+SD <- SD %>% select(Date, SDGE, starts_with("Hourly"))
+head(SD)
+```
+
+## Structual and General EDA
+
+First, lets take a broad look at our data, including variable types, descriptive statistics and NA counts. 
+
+```{r}
+str(SD)
+describe(SD)
+```
+
+Evaluate missing values by column
+```{r}
+missing.values <- SD %>%
+    gather(key = "key", value = "val") %>%
+    mutate(is.missing = is.na(val)) %>%
+    group_by(key, is.missing) %>%
+    summarise(num.missing = n()) %>%
+    filter(is.missing==T) %>%
+    select(-is.missing) %>%
+    arrange(desc(num.missing)) 
+
+missing.values %>%
+  ggplot() + 
+    geom_bar(aes(x=reorder(key, num.missing), y=num.missing), stat = 'identity') +
+    labs(x='Variable', y="Number of missing values", title='Figure 1.1: Missing Values by Variable') +
+    coord_flip()
+```
+
+Evaluate NAs by observation - 304 observations are missing all weather data, we will either need to impute or stick with regression models. 
+```{r}
+NA_row <- rowSums(is.na(SD))
+obs <- seq(1:nrow(SD))
+
+NA_row <- data.frame(obs, NA_row)
+NA_row %>% filter(NA_row == 16) %>% tally()
+```
+
+Properly format variables
+```{r}
+# Numeric
+SD$HourlyDryBulbTemperature <- as.numeric(as.character(SD$HourlyDryBulbTemperature))
+SD$HourlyDewPointTemperature <- as.numeric(as.character(SD$HourlyDewPointTemperature))
+SD$HourlyPrecipitation <- as.numeric(as.character(SD$HourlyPrecipitation))
+SD$HourlyVisibility <- as.numeric(SD$HourlyVisibility)
+SD$HourlyWindDirection <- as.numeric(SD$HourlyWindDirection)
+
+# Factors
+SD$HourlyPresentWeatherType <- as.factor(SD$HourlyPresentWeatherType)
+SD$HourlySkyConditions <- as.factor(SD$HourlySkyConditions)
+
+# Only run this if you loaded in SD data from EDA
+SD$Date <- as_datetime(SD$Date)
+```
+## Imputation
+Since we're doing a time-based imputation, we won't separate training/testing data before imputing in case the first validation observation is missing values. 
+```{r}
+# NAs in wind gusts should be zero
+SD <- SD %>% mutate(HourlyWindGustSpeed = ifelse(is.na(HourlyWindGustSpeed), 0, HourlyWindGustSpeed))
+
+# Fill the rest of NAs with the last non-NA value
+SD <- na.locf(SD)
+```
+
+
+## Numeric EDA 
+
+```{r}
+num <- SD %>% dplyr::select(where(is.numeric))
+describe(num)
+summary(num)
+```
+
+### Outliers 
+```{r}
+tests = lapply(num, grubbs.test) 
+tests$HourlyWindSpeed
+```
+
+The grubbs test shows our max value for wind speed, 33, is an outlier. This makes sense because wind speed ranges in the single digits- it is likely that 33 was a typo. 
+
+Not sure 33 mph winds is a typo, could easily happen in a storm. 
+
+### Correlation
+```{r}
+M = cor(num)
+corrplot(M,, main = "Figure 1.2: Correlation Between Numeric Features", type = "lower", method = "color")
+```
+As we can see from our corrplot, station pressure, altimeter setting, & sea level pressure are 100% correlated. Hourly dry bulb, wet bulb, and dew point temperatures are closely correlated as well. We will be keeping wet bulb temperature as that is analogous to what humans feel. Altimeter setting is another measure of pressure, so we will be keeping hourly station pressure for ease of understanding. 
+
+Correlations below look much better
+```{r}
+drop2 <- c("HourlyDryBulbTemperature","HourlyAltimeterSetting", "HourlyDewPointTemperature", "HourlySeaLevelPressure")
+num2 = num[,!(names(num) %in% drop2)]
+M2 = cor(num2)
+corrplot(M2,  type = "lower", main = "Figure 1.3: Correlations After Removal of Highly-Correlated Variables" , method = "color")
+```
+
+```{r}
+ggplot(data = num2, aes(x= HourlyWetBulbTemperature, y=SDGE)) + 
+  geom_point() + 
+  stat_poly_line() + stat_poly_eq() +
+  labs(title="Figure 1.4: SDGE Usage By Wet Bulb Temperature", 
+         x="Wet Bulb Temp (°F)", y = "Hourly Energy Use (MWh)") 
+  
+```
+
+
+
+Scatter plots for numeric features compared to hourly energy use - may need to explore non-linear options. 
+```{r}
+ScatPlotter.SD <- function(numvar){
+  ggplot(num2, aes(x = num2[,numvar], y = SDGE)) +
+    geom_point(shape = 1 , alpha = 0.2) +
+    stat_poly_line() + stat_poly_eq(geom = "label", label.x = "middle") +
+    xlab(colnames(num2[numvar]))
+}
+
+num_cols <- c(2:11)
+Scatterplots <- lapply(num_cols, ScatPlotter.SD)
+grid.arrange(grobs = Scatterplots, top = "Figure 1.5: Scatterplots for Each Numeric Predictor vs. SDGE")
+
+# For paper
+paper_cols <- c(6,8)
+Scatter_paper <- lapply(paper_cols, ScatPlotter.SD)
+grid.arrange(grobs = Scatter_paper, top = "Figure 1.6: Scatterplots for Selected Predictors vs. SDGE")
+```
+
+Time Series for Numeric Features 
+Will make adjustments/sort out features to make graphs easier to read
+```{r}
+num_wdate <- num2
+num_wdate$Date <- SD$Date
+
+TS_plotter <- function(x){
+  ggplot(num_wdate, aes(x = Date)) +
+  geom_line(aes(y = num_wdate[,x]))+
+  ylab(colnames(num_wdate[x]))
+}
+
+PHP_cols <- c(3,4,5,6)
+TWV_cols <- c(2,8,9,10,11)
+TS_target <- TS_plotter(1) + ggtitle("Figure 1.7: Time Series for SDGE") 
+TS_PHP <- lapply(PHP_cols, TS_plotter)
+TS_TWV <- lapply(TWV_cols, TS_plotter)
+TS_paper <- lapply(paper_cols, TS_plotter)
+
+plot(TS_target) 
+grid.arrange(grobs = TS_PHP, top = "Figure 1.8: Time Series for Pressure, Humidity, and Precipitation Variables")
+grid.arrange(grobs = TS_TWV, top = "Figure 1.9: Time Series for Temperature, Wind, and Visibility Variables")
+grid.arrange(grobs = TS_paper, top = "Figure 1.10 Time Series for Selected Predictors")
+```
+
+Distributions - also will make this look better tomorrow.
+```{r}
+Hist_plotter <- function(x){
+  ggplot(num_wdate, aes(x = num_wdate[,x])) +
+    geom_histogram() +
+    xlab(colnames(num_wdate[x]))
+}
+
+Hist_target <- Hist_plotter(1) + ggtitle("Figure X.x: Distribution for SDGE") 
+Hist_PHP <- lapply(PHP_cols, Hist_plotter)
+Hist_TWV <- lapply(TWV_cols, Hist_plotter)
+Hist_paper <- lapply(paper_cols, Hist_plotter)
+
+plot(Hist_target) 
+grid.arrange(grobs = Hist_PHP, top = "Figure X.x: Distribution for Pressure, Humidity, and Precipitation Variables")
+grid.arrange(grobs = Hist_TWV, top = "Figure X.x: Distribution for Temperature, Wind, and Visibility Variables")
+grid.arrange(grobs = Hist_paper, top = "Figure 1.13: Distributions for Selected Predictors")
+```
+
+## Categorical EDA
+
+Category Count Tables - Bar plots were too messy since we have so many categories
+```{r}
+SD %>% group_by(HourlyPresentWeatherType) %>% tally() %>% arrange(desc(n))
+SD %>% group_by(HourlySkyConditions) %>% tally() %>% arrange(desc(n))
+```
+
+ANOVAs to see if category affects SDGE - 
+Wouldn't work with SkyConditions since there are 8,145 categories. I think that having so many groups is forcing a significant result for WeatherType, looking at our Tukey most categories aren't different, so we'll just stick with our numeric features. 
+```{r}
+WT_aov <- aov(SDGE ~ HourlyPresentWeatherType, data = SD)
+
+summary(WT_aov)
+
+#Sky_aov <- aov(SDGE ~ HourlySkyConditions, data = SD) #This has too many categories and takes forever to run. 
+
+WT_tukey <- TukeyHSD(WT_aov)
+```
+
+## Target EDA
+
+We've already seen yearly seasonality in SDGE from time series above, lets evaluate a few days to see if there is also a daily seasonality. We'll evaluate the first couple days in Jan, Apr, Jul, and Oct. We definitely see a daily-based seasonality. So, we'll have to account for seasonality across the year and the day when modelling. 
+```{r}
+SD %>% filter(Date < '2019-01-03 18:00:00') %>% ggplot(aes(x = Date, y = SDGE)) + geom_line() + ggtitle("Figure X.x: Seasonality in January")
+SD %>% filter(Date < '2019-04-03 18:00:00') %>% filter(Date > '2019-03-31 18:00:00') %>% ggplot(aes(x = Date, y = SDGE)) + geom_line() + ggtitle("Figure 1.14: Seasonality in April")
+SD %>% filter(Date < '2019-07-03 18:00:00') %>% filter(Date > '2019-06-30 18:00:00') %>% ggplot(aes(x = Date, y = SDGE)) + geom_line() + ggtitle("Figure 1.15: Seasonality in July")
+SD %>% filter(Date < '2019-10-03 18:00:00') %>% filter(Date > '2019-09-30 18:00:00') %>% ggplot(aes(x = Date, y = SDGE)) + geom_line() + ggtitle("Figure 1.16: Seasonality in October")
+```
+
+# Section 2 - Modelling 
+
+When incorporating weather variables into the model, we will lag the predictors behind by 1-hour. This will make it so the SDGE has approximately 1 hour and 5 minutes to take any action on the with a forecast (since weather originally came in at minute 54 of each hour + 1 minute to run the model and return the prediction).
+
+To simulate a real-life scenario, we will use a sliding train/test window for models that need specific training periods for weights (like exponential smoothing/regression). So, the validation set will begin in the last month (Sep 2022), then we will slide 1 hour forward and rerun the model, iterating until we reach the end of the month. 
+
+Any non-weighted method (Naive/moving average) will be calculated on the entire data set and then split for evaluation, since we can assume we'll always have the last n-observations we need for the forecast.
+
+## Baseline Model - Naive Forecast
+
+Create forecasts and calculate metrics
+```{r}
+# SD got knocked out of order somewhere, rearrange to make sure lagging works
+SD <- SD %>% arrange(Date)
+
+# Create Naive Forecasts
+SD$Naive <- lag(SD$SDGE)
+
+# Calculate Error
+SD$Naive_err <- SD$SDGE - SD$Naive
+
+# Split for evaluation
+SD_tr <- SD %>% filter(Date < '2022-08-31 19:00:00') %>% na.omit()
+SD_val <- SD %>% filter(Date > '2022-08-31 18:00:00')
+
+# Calculate Metrics
+Naive_rmse_tr <- sqrt(mean(SD_tr$Naive_err^2))
+Naive_rmse_val <- sqrt(mean(SD_val$Naive_err^2))
+
+paste0("We had a RMSE of ", round(Naive_rmse_val,2), " with naive forecasts on the validation data.")
+```
+
+Plot on validation data
+```{r}
+ggplot(SD_val, aes(x = Date)) +
+  geom_line(aes(y = Naive), color = 'green', linewidth = 1) +
+  geom_line(aes(y = SDGE), color = 'blue', alpha = 0.4, linewidth = 1) +
+  ggtitle("Figure 2.1: Naive Forecasts on Validation Data")
+
+ggplot(SD_val, aes(x = Date, y = Naive_err)) +
+  geom_line() + 
+  ggtitle("Figure 2.2: Residuals for Naive Forecasts on Validation Data")
+```
+
+## Moving Average Forecasts
+
+We'll use a function to evaluate different window sizes
+```{r}
+SD_madf <- SD
+RMSE_tr <- c()
+RMSE_val <- c()
+
+SD.ma <- function(k){
+  
+  # Calculate forecasts
+  DailyMA <- rollmean(SD_madf$SDGE, k = k)
+  
+  # Add NAs to forecast vector so we can bind it to our df
+  DailyMA <- c(rep(NA, k-1), DailyMA)
+  
+  SD_madf$DailyMA <- DailyMA
+  
+  # Calculate Error
+  SD_madf$DailyMA_err <- SD_madf$SDGE - SD_madf$DailyMA
+  
+  # Split for eval
+  SD_tr <- SD_madf %>% filter(Date < '2022-08-31 19:00:00') %>% na.omit()
+  SD_val <- SD_madf %>% filter(Date > '2022-08-31 18:00:00')
+  
+  # Calculate Metrics
+  RMSE_tr <- sqrt(mean(SD_tr$DailyMA_err^2))
+  RMSE_val <- sqrt(mean(SD_val$DailyMA_err^2))
+  
+  # List and return
+  RMSE_list <- list(k, RMSE_tr, RMSE_val)
+
+}
+
+k = c(1:24, seq(48, 168, 24))
+
+# Create results data frame
+SD_ma_res <- lapply(k, SD.ma)
+SD_ma_res <- as.data.frame(do.call(rbind, SD_ma_res))
+colnames(SD_ma_res) <- c("k", "RMSE_tr", "RMSE_val")
+
+SD_ma_res <- SD_ma_res %>% filter(RMSE_tr > 0) 
+best_window <- SD_ma_res[which.min(SD_ma_res$RMSE_tr), ]
+best_window$k
+
+MA_rmse_tr <- best_window$RMSE_tr[[1]]
+MA_rmse_val <- best_window$RMSE_val[[1]]
+```
+Plot
+```{r}
+DailyMA_2 <- rollmean(SD_madf$SDGE, k = 2)
+DailyMA_2 <- c(rep(NA, 1), DailyMA_2)
+
+
+SD_madf$DailyMA_2 <- DailyMA_2
+
+ggplot(SD_madf, aes(x = Date)) +
+  geom_line(aes(y = SDGE), color = "blue", linewidth = 1, alpha = 0.4) +
+  geom_line(aes(y = DailyMA_2), color = "darkgreen", linewidth = 1, alpha = 0.5) +
+  ggtitle("Figure 2.3: Forecasts for 2-Hour Moving Average Model")
+```
+
+## Auto-ARIMA with predictors
+
+Split predictors and target - WetBulbTemp and StationPressure were the only variables with slight relationships, so we'll use those.
+```{r}
+X_tr <- SD_tr %>% select(HourlyWetBulbTemperature, HourlyStationPressure) %>% as.matrix()
+X_val <- SD_val %>% select(HourlyWetBulbTemperature, HourlyStationPressure) %>% as.matrix()
+y_tr <- SD_tr$SDGE
+y_test <- SD_val$SDGE
+```
+
+Create Model
+```{r}
+set.seed(123)
+auto_arima_model <- auto.arima(y_tr, xreg = X_tr, seasonal = TRUE, stepwise = FALSE)
+summary(auto_arima_model)
+
+auto_arima_rmse_tr <- sqrt(mean(auto_arima_model$residuals^2))
+
+checkresiduals(auto_arima_model) 
+```
+
+Forecast
+```{r}
+val_forecast <- forecast(auto_arima_model, xreg = X_val)
+
+# Calculate errors
+val_forecast_err <- SD_val$SDGE - val_forecast$mean
+auto_arima_rmse_val <- sqrt(mean(val_forecast_err^2))
+```
+
+Plot
+```{r}
+autoplot(val_forecast, series = "Forecast") +
+  coord_cartesian(xlim = c(38000, 39488)) +
+  ggtitle("Figure 2.5: Forecasts from Regression with ARIMA(2,1,3) errors")
+```
+
+## ETS
+Create time series - Will just do it for everything in case we need predictor ts later
+```{r}
+X_tr_ts <- ts(X_tr, frequency = 24)
+X_val_ts <- ts(X_val, frequency = 24)
+y_val_ts <- ts(y_test, frequency = 24)
+y_tr_ts <- ts(y_tr, frequency = 24)
+```
+
+Fit ETS
+```{r}
+SD_ets <- ets(y_tr_ts, model = "ZNA")
+summary(SD_ets)
+```
+
+Forecast, Calculate RMSE, and Plot
+```{r}
+ets_forecast <- forecast(SD_ets, h=length(y_test))
+
+#RMSE
+val_forecast_err <- SD_val$SDGE - ets_forecast$mean
+ets_rmse_val <- sqrt(mean(val_forecast_err^2))
+
+# Not sure what happened, but training residuals didn't calculate right, so we have to calculate them ourselves
+tr_forecast_err <- SD_tr$SDGE - SD_ets$fitted
+ets_rmse_tr <- sqrt(mean(tr_forecast_err^2))
+
+#plot
+autoplot(ets_forecast, series = "Forecast") +
+  coord_cartesian(xlim = c(1550, 1650)) +
+  ggtitle("Figure 2.6: Forecasts from ETS(M,N,A)")
+```
+
+## Manual ARIMA
+Twice differenced ACF plot
+```{r}
+acf(diff(diff(X_tr)) , main = "Figure 2.8: Twice-Differenced ACF Plots for Numeric Predictors")
+```
+
+Twice differenced PACF plot
+```{r}
+#take a look pacf plot with differenced
+pacf(diff(diff(X_tr)), main = "Figure 2.9: Twice-Differenced PACF Plots for Numeric Predictors")
+```
+
+Model
+```{r}
+#Arima model
+manual_arima_model<- Arima(y_tr, order=c(3,2,2),xreg=X_tr)
+summary(manual_arima_model)
+```
+
+Residual Plot
+```{r}
+#check the residuals
+checkresiduals(manual_arima_model)
+```
+
+Forecast, Calculate RMSE, and Plot
+```{r}
+manual_forecast<-forecast(manual_arima_model, xreg = X_val)
+
+#RMSE
+val_forecast_err <- SD_val$SDGE - manual_forecast$mean
+manual_arima_rmse_val <- sqrt(mean(val_forecast_err^2))
+manual_arima_rmse_tr <- sqrt(mean(manual_arima_model$residuals^2))
+
+#plot
+autoplot(manual_forecast, series = "Forecast") +
+  coord_cartesian(xlim = c(38000, 39488)) +
+  ggtitle("Figure 2.11: Forecast from Regression with ARIMA(3,2,2) Errors")
+```
+
+## Manual ARIMA with Seasonality
+Create daily ts for easier seasonal eval
+```{r}
+SD_ts <- ts(SD$SDGE, frequency = 24)
+```
+
+```{r}
+SD_ts %>% diff(lag = 24) %>% diff() %>% autoplot(main = "Figure 2.12: Twice Differenced Time Series for SDGE") 
+```
+
+```{r}
+Acf(SD_ts, lag.max = 72)
+SD_ts %>% diff(lag = 24) %>% diff() %>% Acf(main = "Figure 2.13: Twice Differenced ACF Plot for SDGE") 
+```
+pacf
+```{r}
+Pacf(SD_ts)
+SD_ts %>% diff(lag = 24) %>% diff() %>% Pacf(main = "Figure 2.14: Twice Differenced PACF Plot for SDGE")
+```
+
+Fit model - Acf shows strong MA(1) for non-seasonal and seasonal on twice differenced chart, same story with Pacf for our AR(p) component. We took a non-seasonal and seasonal difference so we'll train a ARIMA(1,1,1)(1,1,1) model
+```{r}
+seasonal_arima <- Arima(y_tr, order=c(1,1,1), seasonal = c(1,1,1), xreg=X_tr)
+summary(seasonal_arima)
+seasonal_arima %>% residuals() %>% ggtsdisplay(main = "Figure 2.15: ARIMA (1,1,1)(1,1,1) Residual Diagnostics")
+seasonal_arima %>% checkresiduals()
+```
+
+Continue to tune - Definitely didn't include enough components, we'll keep playing around until we find good values. (3,1,3) looks good for non-seasonal components. 
+```{r}
+seasonal_arima_tuned <- Arima(y_tr, order=c(3,1,3), seasonal = c(2,1,2), xreg=X_tr)
+summary(seasonal_arima_tuned)
+seasonal_arima_tuned %>% residuals() %>% ggtsdisplay(main = "Figure 2.17: ARIMA (3,1,3)(2,1,2) Residual Diagnostics")
+seasonal_arima_tuned %>% checkresiduals() 
+```
+
+Forecast, Calculate RMSE, and Plot
+```{r}
+seasonal_forecast <- forecast(seasonal_arima_tuned, xreg = X_val)
+
+#RMSE
+val_forecast_err <- SD_val$SDGE - seasonal_forecast$mean
+seasonal_arima_rmse_val <- sqrt(mean(val_forecast_err^2))
+seasonal_arima_rmse_tr <- sqrt(mean(seasonal_arima_tuned$residuals^2))
+
+#plot
+autoplot(seasonal_forecast, series = "Forecast") +
+  coord_cartesian(xlim = c(38000, 39488)) +
+  ggtitle("Figure 2.19: Forecasts for ARIMA(3,1,3)(2,1,2) Model")
+```
+
+
+## Neural Network
+```{r}
+#size= (p+p+1)/2 = (3+2+1)/2 =3
+set.seed(123)
+SD_NN <- nnetar(y_tr_ts, p=3, P=2, size =3, xreg = X_tr)
+```
+
+```{r}
+#prediction
+SD_NN.pred<-forecast(SD_NN, xreg = X_val)
+
+# Not sure why but this prints out the entire data frame of forecasts, won't output to reduce appendix clutter.
+#summary(SD_NN.pred)
+```
+
+```{r}
+# Plot the errors for the training period
+plot(SD_NN.pred$residuals, main = "Figure 2.20: Neural Net Residual Plot for Training Period")
+
+#Accuracy & Plot
+accuracy(SD_NN.pred, y_test)
+autoplot(SD_NN.pred, series = "Forecast") +
+  coord_cartesian(xlim = c(1000, 2000)) +
+  ggtitle("Figure 2.21: Forecasts for Neural Network Model")
+```
+Get metrics
+```{r}
+nnetar_rmse_tr <- sqrt(mean(SD_NN$residuals^2, na.rm = TRUE))
+val_forecast_err <- SD_val$SDGE - SD_NN.pred$mean
+nnetar_rmse_val <- sqrt(mean(val_forecast_err^2))
+```
+
+## avNNet
+Not included in final but leaving for future reference/discussion
+```{r, eval=FALSE}
+modelFit <- avNNet(X_tr,
+                   y_tr,
+                   size = 5,
+                   linout = TRUE,
+                   trace = FALSE)
+summary(modelFit)
+
+nnpred1 <- predict(modelFit, X_val)
+```
+
+
+```{r, eval=FALSE}
+accuracy(nnpred1, y_test)
+```
+
+## Regression 
+Also not included in final but left for reference.
+
+Based on our time series, it looks like we have additive seasonality with no trend. 
+
+```{r, eval=FALSE}
+SD_reg_addseason <- tslm(y_tr_ts ~ season)
+SD_reg_addseason_pred <- forecast(SD_reg_addseason, h = length(y_val_ts))
+```
+
+Forecast, Calculate RMSE, and Plot
+```{r, eval=FALSE}
+reg_forecast <- forecast(SD_reg_addseason, h=length(y_test))
+
+#RMSE
+val_forecast_err <- SD_val$SDGE - reg_forecast$mean
+reg_rmse_val <- sqrt(mean(val_forecast_err^2))
+reg_rmse_tr <- sqrt(mean(SD_reg_addseason$residuals^2))
+
+#plot
+autoplot(reg_forecast, series = "Forecast") +
+  coord_cartesian(xlim = c(1550, 1650)) +
+  ggtitle("Figure 2.7: Forecasts from Linear Regression Model")
+```
+
+# Section 3 - Results
+Create Results df
+```{r}
+Model <- c("Naive", "2-Hour MA", "Auto ARIMA", "Manual ARIMA", "Seasonal ARIMA", "ETS", "Neural Net.")
+Tr_RMSE <- c(Naive_rmse_tr, MA_rmse_tr, auto_arima_rmse_tr, manual_arima_rmse_tr, seasonal_arima_rmse_tr, ets_rmse_tr, nnetar_rmse_tr)
+Val_RMSE <- c(Naive_rmse_val, MA_rmse_val, auto_arima_rmse_val, manual_arima_rmse_val, seasonal_arima_rmse_val, ets_rmse_val, nnetar_rmse_val)
+
+Results_df <- data.frame(Model, Tr_RMSE, Val_RMSE)
+
+Results_df <- Results_df %>% mutate(BaselineComp_tr = ifelse(Tr_RMSE == Naive_rmse_tr, "Baseline", ifelse(Tr_RMSE < Naive_rmse_tr, "Better", "Worse")))
+Results_df <- Results_df %>% mutate(BaselineComp_val = ifelse(Val_RMSE == Naive_rmse_val, "Baseline", ifelse(Val_RMSE < Naive_rmse_val, "Better", "Worse")))
+
+Results_df <- Results_df %>% mutate_if(is.character, as.factor)
+```
+
+Plot Training RMSE's
+```{r}
+ggplot(Results_df, aes(x = reorder(Model, -Tr_RMSE), y = Tr_RMSE, color = BaselineComp_tr)) + 
+  geom_segment(aes(x=reorder(Model, -Tr_RMSE), xend = reorder(Model, -Tr_RMSE), y = 0, yend = Tr_RMSE)) +
+  scale_color_manual(values = c("dodgerblue2", "green3", "firebrick2")) +
+  geom_point(size = 9) + coord_flip() + labs(color = "Comparison to Baseline") +
+  ylab("RMSE for Training Data (MWh)") + ggtitle("Figure 3.1: Model Results for Training Data") + xlab("Model") + geom_text(aes(label = round(Tr_RMSE)), color = "black", size = 2.5, fontface = "bold")
+```
+
+Plot Validation RMSE's - Reordering isn't working when I flip coordinates. Need to find workaround.
+```{r}
+ggplot(Results_df, aes(x = reorder(Model, -Val_RMSE), y = Val_RMSE, color = BaselineComp_val)) + 
+  geom_segment(aes(x=reorder(Model, -Val_RMSE), xend = reorder(Model, -Val_RMSE), y = 0, yend = Val_RMSE)) +
+  scale_color_manual(values = c("dodgerblue2", "green3", "firebrick2")) +
+  geom_point(size = 9) + coord_flip() + labs(color = "Comparison to Baseline") +
+  ylab("RMSE for Validation Data (MWh)") + ggtitle("Figure 3.2: Model Results for Validation Data") + xlab("Model") + geom_text(aes(label = round(Val_RMSE)), color = "black", size = 2.5, fontface = "bold")
+```
+
+# Random Presentation Graphs
+
+
+## Create Theme and USD color
+```{r}
+Pres_theme <- function(base_size = 11, base_family = "") {
+  
+  theme_gray() %+replace%
+    
+    theme(
+      text = element_text(family = "sans", size = 12),
+      
+      panel.grid.major = element_line(color = "#303030"),
+      panel.grid.minor = element_line(color = "#303030"),
+      panel.background = element_rect(fill = "#212121"),
+      panel.border = element_rect(color = "#303030", fill = NA),
+      
+      axis.line = element_line(color = "#303030"),
+      axis.ticks = element_line(color = "#303030"),
+      axis.title = element_text(color = "white"),
+      axis.text = element_text(color = "white"),
+      
+      plot.background = element_rect(fill = "#212121", color = "#212121")
+
+      
+      
+      
+    )
+}
+
+USD_color <- "#79bde9"
+```
+
+## SDGE Power Content
+
+```{r}
+Source <- c("Biomass", "Solar", "Wind", "Hydro", "Gas", "Nuclear", "Unspecified")
+Percent <- c(0.9, 28.5, 15.2, 1.8, 29.6, 0.2, 23.9)
+Content <- data.frame(Source, Percent)
+
+ggplot(Content, aes(x = reorder(Source, Percent), y = Percent)) + geom_bar(stat = "identity", fill = USD_color) +
+  xlab("Energy Source") + coord_flip() + Pres_theme()
+```
