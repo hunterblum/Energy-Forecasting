@@ -355,7 +355,7 @@ Plot on validation data
 ggplot(SD_val, aes(x = Date)) +
   geom_line(aes(y = Naive), color = 'red', linewidth = 1, alpha = 0.6) +
   geom_line(aes(y = SDGE), color = USD_color, linewidth = 1) +
-  Pres_theme()
+  Pres_theme() + ylab("SDGE Power Consumption (MWh)")
 
 ggplot(SD_val, aes(x = Date, y = Naive_err)) +
   geom_line(color = USD_color) + 
@@ -428,6 +428,7 @@ SD_madf %>% filter(Date > '2022-08-31 18:00:00') %>%
   ggplot( aes(x = Date)) +
   geom_line(aes(y = SDGE), color = "red", linewidth = 1, alpha = 0.6) +
   geom_line(aes(y = DailyMA_2), color = USD_color, linewidth = 1) +
+  ylab("SDGE Power Consumption (MWh)") + 
   Pres_theme()
 ```
 Residual Plot
@@ -636,6 +637,7 @@ SD_val$NNPred <- as.numeric(SD_NN.pred$mean)
 ggplot(SD_val, aes(x = Date)) +
   geom_line(aes(y = SDGE), color = "red", linewidth = 1, alpha = 0.6) +
   geom_line(aes(y = NNPred), color = USD_color, linewidth = 1) +
+  ylab("SDGE Power Consumption (MWh)") +
   Pres_theme()
 ```
 
